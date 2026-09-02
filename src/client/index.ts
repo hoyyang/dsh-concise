@@ -62,17 +62,20 @@ const FALLBACK: Record<string, string> = { ...en }
 const css = [
   '[data-dsh-concise-anchor]{display:inline-flex;align-items:center;flex:none}',
   '.dsh-concise-root{position:relative;flex:none;display:inline-flex}',
-  '.dsh-concise-trigger{min-width:0;height:28px;cursor:pointer;background:0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:24px;outline:none;align-items:center;gap:6px;padding:0 10px;font-size:12px;font-weight:500;line-height:20px;display:inline-flex;color:var(--dsw-alias-label-secondary);transition:background-color .12s ease,border-color .12s ease,color .12s ease}',
+  '.dsh-concise-trigger{min-width:0;height:28px;cursor:pointer;background:0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:24px;outline:none;align-items:center;gap:6px;padding:0 8px;font-size:12px;font-weight:500;line-height:20px;display:inline-flex;color:var(--dsw-alias-label-secondary);transition:background-color .12s ease,border-color .12s ease,color .12s ease}',
   '.dsh-concise-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
   '.dsh-concise-trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-border-l3)}',
   '.dsh-concise-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default;opacity:.7}',
-  '.dsh-concise-dot{width:7px;height:7px;border-radius:100%;flex:none;background:var(--dsw-alias-label-dimmed);border:1px solid var(--dsw-alias-border-l2);transition:background-color .12s ease,border-color .12s ease,box-shadow .12s ease}',
+  // 滑动开关：轨道 30×16（28px 按钮内上下各留 6px），滑块 10px 且在轨道内四周边距恒为 2px，
+  // 关=靠左 / 开=靠右对称。滑块用带回弹的 spring 贝塞尔，按压轻微拉长（iOS 手感），松手滑入定位。
+  '.dsh-concise-switch{position:relative;width:30px;height:16px;border-radius:999px;flex:none;background:var(--dsw-alias-interactive-bg-hover);border:1px solid var(--dsw-alias-border-l2);transition:background-color .25s ease,border-color .25s ease,box-shadow .25s ease}',
+  '.dsh-concise-knob{position:absolute;top:50%;left:2px;width:10px;height:10px;border-radius:999px;background:#fff;box-shadow:0 1px 2.5px rgba(0,0,0,.28);transform:translateY(-50%);transition:transform .3s cubic-bezier(.34,1.56,.64,1),width .18s ease}',
+  '.dsh-concise-trigger:active .dsh-concise-knob{width:11px}',
   '.dsh-concise-label{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}',
-  '.dsh-concise-state{font-size:11px;line-height:16px;flex:none;color:var(--dsw-alias-label-caption)}',
-  // ON 态：Claude 品牌橙（#D97757）描边 + 实心点，浮在 composer 原生控件旁不突兀
+  // ON 态：Claude 品牌橙（#D97757）轨道 + 滑块右移 + 辉光，浮在 composer 原生控件旁不突兀
   '.dsh-concise-trigger[data-on="true"]{color:var(--dsw-alias-label-primary);border-color:rgba(217,119,87,.72)}',
-  '.dsh-concise-trigger[data-on="true"] .dsh-concise-dot{background:rgba(217,119,87,.9);border-color:rgba(217,119,87,.9);box-shadow:0 0 6px rgba(217,119,87,.55)}',
-  '.dsh-concise-trigger[data-on="true"] .dsh-concise-state{color:rgb(193,95,60)}',
+  '.dsh-concise-trigger[data-on="true"] .dsh-concise-switch{background:linear-gradient(90deg,#E29A7E,#D97757);border-color:rgba(217,119,87,.85);box-shadow:0 0 9px rgba(217,119,87,.5)}',
+  '.dsh-concise-trigger[data-on="true"] .dsh-concise-knob{transform:translate(14px,-50%)}',
 ].join('\n')
 
 /**
@@ -99,21 +102,41 @@ function findModelSeat(myRoot: HTMLElement): { row: HTMLElement; seat: HTMLEleme
   return null
 }
 
+/** 会话级状态缓存：切会话时按钮先用缓存即时渲染（stale-while-revalidate），不闪加载态。 */
+const stateCache = new Map<string, boolean>()
+
+function cacheKey(sessionId: string | undefined): string {
+  return sessionId ?? ''
+}
+
 async function fetchState(sessionId: string | undefined): Promise<boolean | null> {
   try {
     const qs = sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''
     const response = await fetch(STATE_URL + qs, { cache: 'no-store' })
     if (!response.ok) return null
-    const data = await response.json() as { enabled?: unknown }
-    return data.enabled === true
+    const data = await response.json() as { enabled?: unknown; default?: unknown }
+    const enabled = data.enabled === true
+    stateCache.set(cacheKey(sessionId), enabled)
+    // 顺带记住「新会话默认值」：其它未访问过的会话也能即时渲染
+    if (typeof data.default === 'boolean') stateCache.set('', data.default)
+    return enabled
   } catch {
     return null
   }
 }
 
 const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId?: string }): React.ReactElement => {
-  const [enabled, setEnabled] = React.useState<boolean | null>(null)
+  // 初值优先取会话缓存，其次取新会话默认值缓存：切会话/首访都即时呈现，后台再校准
+  const [enabled, setEnabled] = React.useState<boolean | null>(() => {
+    const cached = stateCache.get(cacheKey(sessionId)) ?? stateCache.get('')
+    return cached === undefined ? null : cached
+  })
   const [busy, setBusy] = React.useState(false)
+
+  const applyEnabled = (value: boolean): void => {
+    setEnabled(value)
+    stateCache.set(cacheKey(sessionId), value)
+  }
 
   React.useEffect(() => {
     let disposed = false
@@ -122,13 +145,13 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
     })
     const refetch = () => {
       void fetchState(sessionId).then((value) => {
-        if (value !== null) setEnabled(value)
+        if (value !== null) applyEnabled(value)
       })
     }
     const onChange = (event: Event) => {
       const detail = (event as CustomEvent<{ enabled?: boolean; sessionId?: string }>).detail
       // 只接受同一会话的即时广播；其它会话的变化走轮询/focus 重取
-      if (detail && typeof detail.enabled === 'boolean' && detail.sessionId === sessionId) setEnabled(detail.enabled)
+      if (detail && typeof detail.enabled === 'boolean' && detail.sessionId === sessionId) applyEnabled(detail.enabled)
       else refetch()
     }
     const onVisible = () => {
@@ -162,7 +185,7 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
       if (response.ok) {
         const data = await response.json() as { enabled?: unknown }
         const next = data.enabled === true
-        setEnabled(next)
+        applyEnabled(next)
         window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { enabled: next, sessionId } }))
       }
     } catch (error) {
@@ -173,7 +196,6 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
   }
 
   const on = enabled === true
-  const stateLabel = enabled === null ? t('unknown') : on ? t('on') : t('off')
   return React.createElement(
     'div',
     { className: 'dsh-concise-root' },
@@ -189,9 +211,9 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
         disabled: busy || enabled === null,
         onClick: () => { void toggle() },
       },
-      React.createElement('span', { className: 'dsh-concise-dot', 'aria-hidden': true }),
+      React.createElement('span', { className: 'dsh-concise-switch', 'aria-hidden': true },
+        React.createElement('span', { className: 'dsh-concise-knob' })),
       React.createElement('span', { className: 'dsh-concise-label' }, 'Concise'),
-      React.createElement('span', { className: 'dsh-concise-state' }, stateLabel),
     ),
   )
 }

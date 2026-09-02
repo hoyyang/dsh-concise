@@ -3,6 +3,30 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-09-02
+
+### Added
+
+- Sliding-switch toggle UI: the solid dot is now an iOS-style track + knob
+  (spring cubic-bezier slide, press-to-stretch feedback, Claude-orange glow
+  when on) — state reads instantly from the switch itself; the redundant
+  开/关 text was removed.
+
+### Changed
+
+- Stronger concise style prompt: never open by restating the question or with
+  pleasantries; no closing offers unless a decision is required; enumerable
+  facts prefer tables/tight lists ("structure is not verbosity"); no
+  between-step narration. Verified live: a knowledge question that took the
+  default style 5m21s / 2.5K tok of sprawling sections answered in 57s /
+  1.6K tok with an essence-first line plus a compact table.
+
+### Fixed
+
+- Session switching no longer flashes a loading state on the toggle: per-
+  session state is cached client-side (stale-while-revalidate) and the API
+  now reports the new-session default so unknown sessions render instantly.
+
 ## [0.3.1] - 2026-09-02
 
 ### Changed
@@ -67,6 +91,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - zh/en locale dictionaries with built-in fallback labels.
 - Accessibility: `aria-pressed` toggle semantics and localized tooltips.
 
+[0.4.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.4.0
 [0.3.1]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.1
 [0.3.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.0
 [0.2.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.2.0
