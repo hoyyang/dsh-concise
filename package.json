@@ -1,7 +1,7 @@
 {
   "name": "dsh-concise",
   "description": "Concise 输出风格开关：结果先行、少废话（对齐 Claude Code 内置 Concise output style）。composer 模型选择按钮右侧一键开关，按会话独立生效（新会话默认关），支持 /concise 命令、style.md 自定义风格与本地 API。",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "main": "lib/index.js",
   "license": "MIT",

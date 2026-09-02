@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1] - 2026-09-02
+
+### Changed
+
+- README restructure: a real before/after comparison (same question, same
+  model, only the Concise toggle differs) now leads the document, followed by
+  a 30-second start guide; reader priority is install → what changes → how
+  to use → advanced → internals.
+
 ## [0.3.0] - 2026-09-02
 
 ### Changed
@@ -58,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - zh/en locale dictionaries with built-in fallback labels.
 - Accessibility: `aria-pressed` toggle semantics and localized tooltips.
 
+[0.3.1]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.1
 [0.3.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.0
 [0.2.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.2.0
 [0.1.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.1.0
