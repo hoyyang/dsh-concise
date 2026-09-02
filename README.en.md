@@ -24,17 +24,20 @@ dsh plugin add hoyyang/dsh-concise
 ## Features
 
 - **One-click toggle** next to the model selection button (`● Concise ON/OFF`)
+- **`/concise` command** in the slash menu and CLI sessions: `/concise`, `/concise on|off`, `/concise status` (parity with Claude Code's `/output-style`)
+- **Custom style**: a non-empty `~/.dsh/dsh-concise/style.md` overrides the built-in style text, effective on the next assembly (parity with `/output-style:new`)
 - **Claude's Concise style**: results first, no preamble, no narration, no filler closers
 - **Same work depth**: only reporting is compressed — never the rigor
 - **Effective on the next turn** via a dynamic system-prompt section (no restart, no session reload)
-- **Global scope**: consistent style across every session
+- **Global scope**: consistent style across every session, including subagents and CLI sessions
 - **Persistent**: atomic state file survives restarts
+- **Auto re-sync**: the button polls lightly every 15 s (visible tab only) plus on focus/visibility, so `/concise`, API, or other-tab changes are reflected without reload
 - **Clear visual state**: Claude-orange outline + solid dot when on, neutral grey when off
 - **Accessible**: `aria-pressed` toggle semantics, zh/en localized tooltip
 - **Multi-tab sync** via a custom DOM event
 - **Precise placement**: anchors immediately right of the model button (fixing the official right-slot's actual left-of-model rendering)
 - **Graceful degradation** when the model seat cannot be found
-- **Clean uninstall**: section, route, styles, and client registration all removed
+- **Clean uninstall**: section, route, host command, styles, and client registration all removed
 
 ## Usage
 
@@ -51,14 +54,27 @@ curl -X POST -H 'content-type: application/json' -d '{"enabled":true}' \
   http://127.0.0.1:3080/dsh-concise/api/set          # → {"enabled":true}
 ```
 
+Slash command (also works in CLI sessions):
+
+```text
+/concise          # toggle
+/concise on|off   # explicit set
+/concise status   # state + style source (built-in / custom)
+```
+
+Custom style: put your own text in `~/.dsh/dsh-concise/style.md` to fully replace the built-in style text — saved edits apply from the next model assembly; delete the file to restore the built-in.
+
 ## How it works
 
 | Layer | Mechanism |
 | --- | --- |
 | Prompt injection | `systemPrompt.section({ name: 'dsh-concise:style', order: 40 })` with a function-valued `text`; disabled renders as an empty string and is dropped |
+| Host command | `commands.register({ name: 'concise' })` — `/concise [on\|off\|status]`, listed in the slash menu automatically |
+| Custom style | `$DSH_HOME/dsh-concise/style.md` overrides the built-in text when non-empty; mtime-cached per assembly |
 | Toggle API | `webServer.register` prefix route `/dsh-concise/api`: `GET /state`, `POST /toggle`, `POST /set` (loopback only) |
 | UI placement | client module anchors in the `conversation.input.right` slot and portals the button right of the model seat, kept in place by a `MutationObserver` |
 | Persistence | `$DSH_HOME` (default `~/.dsh`) `/dsh-concise/state.json`, atomic tmp+rename write |
+| State sync | `dsh-concise:change` DOM event on toggle + 15 s light polling (visible tab) + focus/visibility refetch |
 
 ## Use cases
 

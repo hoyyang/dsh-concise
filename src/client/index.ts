@@ -118,7 +118,7 @@ const ConciseButton = ({ t }: { t: (key: string) => string }): React.ReactElemen
     void fetchState().then((value) => {
       if (!disposed && value !== null) setEnabled(value)
     })
-    const onFocus = () => {
+    const refetch = () => {
       void fetchState().then((value) => {
         if (value !== null) setEnabled(value)
       })
@@ -126,13 +126,23 @@ const ConciseButton = ({ t }: { t: (key: string) => string }): React.ReactElemen
     const onChange = (event: Event) => {
       const detail = (event as CustomEvent<{ enabled?: boolean }>).detail
       if (detail && typeof detail.enabled === 'boolean') setEnabled(detail.enabled)
-      else onFocus()
+      else refetch()
     }
-    window.addEventListener('focus', onFocus)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refetch()
+    }
+    // 轻量轮询：/concise 命令、curl 等本插件之外的入口改状态时，按钮 ≤15s 内跟上
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refetch()
+    }, 15000)
+    window.addEventListener('focus', refetch)
+    document.addEventListener('visibilitychange', onVisible)
     window.addEventListener(CHANGE_EVENT, onChange)
     return () => {
       disposed = true
-      window.removeEventListener('focus', onFocus)
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refetch)
+      document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener(CHANGE_EVENT, onChange)
     }
   }, [])

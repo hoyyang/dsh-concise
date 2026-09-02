@@ -30,17 +30,20 @@ dsh plugin add https://github.com/hoyyang/dsh-concise/releases/latest/download/d
 ## 功能一览
 
 - **一键开关**：composer 工具行模型选择按钮右侧的 `● Concise 开/关` 按钮，单击即切换
+- **`/concise` 命令**：slash 菜单与 CLI 会话均可 `/concise`（切换）、`/concise on|off`（显式设置）、`/concise status`（查状态与风格来源）——对齐 Claude Code 的 `/output-style`
+- **自定义风格**：把任意文本放进 `~/.dsh/dsh-concise/style.md` 即可整体覆盖内置风格文本（改完保存，下一轮组装即生效）——对齐 Claude Code 的 `/output-style:new`
 - **Claude 同款风格**：完整移植 Claude Code 内置 "Concise" output style 的行为定义（结果先行、跳过开场白与旁白、不重复收尾）
 - **工作深浅不变**：只约束表达方式——调查、验证、多角度审查照旧，绝不因简洁而牺牲严谨
 - **下一轮即生效**：通过系统提示词 section 动态注入，切换后无需重开会话、无需重启
-- **全局生效**：所有会话的后续回复统一应用当前风格，团队/个人口径一致
+- **全局生效**：所有会话（含子代理与 CLI 会话）的后续回复统一应用当前风格，团队/个人口径一致
 - **跨重启持久**：开关状态原子写入 `~/.dsh/dsh-concise/state.json`，重启后保持
+- **状态自动同步**：按钮以 15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，`/concise`、API、其它标签页的改动 ≤15s 自动跟上，无需刷新
 - **可视化状态**：开启态 Claude 橙描边 + 实心圆点 + 「开」，关闭态中性灰 + 空心点，一眼可辨
 - **无障碍友好**：`aria-pressed` 开关语义 + 中英双语 tooltip 说明
 - **多标签页同步**：任意一个窗口切换后，同页其它开关实例经自定义事件即时同步
 - **UI 精准落位**：自动锚定模型选择按钮紧右侧（官方 right 槽实际渲染在模型按钮左侧，本插件做了位置修正）
 - **优雅降级**：找不到模型按钮的异常布局下自动退化为原位渲染，功能不丢
-- **卸载即净**：提示词 section、HTTP 路由、样式表、状态注入全部随插件卸载移除，无残留
+- **卸载即净**：提示词 section、HTTP 路由、host 命令、样式表全部随插件卸载移除，无残留
 - **本地化**：界面文案跟随 dsh 语言设置，内置中英双语兜底
 
 ## 用法介绍
@@ -87,7 +90,32 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 - When you made a choice, state it with a one-line reason; surface alternatives only when they are viable and materially different.
 ```
 
-### 5. 也可以用 API 直接控制（脚本/自动化友好）
+### 5. 斜杠命令：`/concise`
+
+输入 `/concise` 即可在 slash 菜单里看到命令（CLI 会话里同样可用），四种用法：
+
+```text
+/concise          # 切换（开 ⇄ 关）
+/concise on       # 显式开启
+/concise off      # 显式关闭
+/concise status   # 查看状态与风格来源（built-in 内置 / custom 自定义）
+```
+
+执行后命令反馈会直接显示结果，例如：
+
+> Concise output style ENABLED — replies lead with results and skip preamble/narration. Effective on the next turn.
+
+### 6. 自定义风格文本（覆盖内置）
+
+想要自己的风格？把文本放进 `~/.dsh/dsh-concise/style.md`，非空即整体覆盖内置风格；删除该文件即恢复内置。修改保存后下一轮模型组装即生效（按 mtime 缓存，无需重载）。`/concise status` 会显示当前来源（custom + 文件路径）。
+
+实测示例——style.md 内容为「Answer in one short sentence, then stop. No lists, no elaboration.」时，问「什么是 REST API」的真实回复：
+
+> REST API 是一种基于 HTTP 协议、用 GET/POST/PUT/DELETE 等标准方法对 URL 表示的资源进行无状态增删改查的网络接口规范。
+
+恰好一句、无列表、无展开。
+
+### 7. 也可以用 API 直接控制（脚本/自动化友好）
 
 ```sh
 # 查询当前状态
@@ -112,7 +140,7 @@ curl -X POST -H 'content-type: application/json' \
 }
 ```
 
-### 6. 怎么确认它生效了
+### 8. 怎么确认它生效了
 
 开着开关随便问一个解释类问题：答案会**直接以结论开头**，没有"好的，让我来解释一下"式开场白，也没有结尾"综上所述"式复述。会话日志（Session log）的上下文视图里也能看到注入的 style section。
 
@@ -137,10 +165,12 @@ curl -X POST -H 'content-type: application/json' \
 | 层 | 机制 |
 | --- | --- |
 | 提示词注入 | `systemPrompt.section({ name: 'dsh-concise:style', order: 40 })`，text 为函数、每次模型组装求值；关闭时返回空串，渲染层自动丢弃该 section |
+| host 命令 | `commands.register({ name: 'concise' })`：`/concise [on\|off\|status]`，slash 菜单自动收录，CLI 会话同样可执行 |
+| 自定义风格 | `$DSH_HOME/dsh-concise/style.md` 非空时覆盖内置文本，mtime 缓存按次求值，改完即生效 |
 | 开关 API | `webServer.register` 前缀路由 `/dsh-concise/api`：`GET /state`、`POST /toggle`、`POST /set`（仅本机回环） |
 | UI 落位 | client 模块注册 `conversation.input.right` 槽作锚点，把按钮 portal 到模型 seat 紧右侧，`MutationObserver` 维持相对位置；React 重渲染/seat 重建后自动对位 |
 | 状态持久化 | `$DSH_HOME`（缺省 `~/.dsh`）/ `dsh-concise/state.json`，tmp + rename 原子写 |
-| 多实例同步 | toggle 后广播 `dsh-concise:change` 自定义事件，window focus 时重取状态 |
+| 状态同步 | toggle 后广播 `dsh-concise:change` 自定义事件；15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，覆盖命令行/API 入口的状态变更 |
 
 ### 设计细节
 
@@ -154,9 +184,12 @@ curl -X POST -H 'content-type: application/json' \
 
 - API 矩阵：`/state`、`/toggle`、`/set`、未知路径 404，输入输出全部断言通过
 - 端到端提示词验证：开启后新会话请求的 system prompt 实测携带 `Concise output style (active)`（会话日志逐字核验）；关闭后同会话下一轮请求 0 命中
+- 自定义风格端到端：style.md 写入后请求实测携带自定义文本且内置文本 0 命中（完全替换）；删除后恢复内置；回复实测遵循自定义指令（恰合一句、无列表）
+- `/concise` 命令矩阵：toggle / on / off / status 四路径实测通过，slash 菜单正确收录与执行，status 输出含状态与风格来源
 - 回复风格实测：解释类问答开启后直接以结论开头，无开场白、无收尾复述
 - UI 落位断言：composer 工具行 DOM 顺序为 `[模型选择][Concise][上下文][发送]`
 - 交互断言：单击翻转状态、`aria-pressed` 同步、按钮文案与状态一致
+- 跨入口同步断言：API 翻转后按钮 ≤15s 自动跟上（轮询实测），focus/visibility 重取生效
 - 持久化断言：切换后 `state.json` 即时落盘，页面刷新后状态一致
 - 热重载验证：`lib/client.js` 热重载后 fiber 重建、UI 即时更新
 - 卸载即净验证：卸载后 entry / registry / junction / client 模块表全部移除，提示词 section 消失
