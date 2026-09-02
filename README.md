@@ -18,7 +18,9 @@
 ## 安装
 
 ```sh
-dsh plugin add hoyyang/dsh-concise
+dsh plugin add hoyyang/dsh-concise   # GitHub 仓库
+# 或
+dsh plugin add dsh-concise           # npm 包
 ```
 
 **零配置，开箱即用**：不需要任何 API Key、账号或设置项，装完刷新 Web 界面即可看到开关按钮。要求 dsh web 0.1.0-rc.8 或更新版本（0.1.0-rc.8 实测通过）。
