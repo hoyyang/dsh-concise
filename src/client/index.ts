@@ -8,7 +8,8 @@
  * （模型按钮与发送按钮之间），并用 MutationObserver 保持相对位置。
  * 找不到模型 seat 时（理论边缘态）退化为 right 槽原位渲染，功能不丢。
  *
- * 数据面：GET/POST /dsh-concise/api（host 插件提供），全局开关，跨重启持久。
+ * 数据面：GET/POST /dsh-concise/api（host 插件提供），**按会话独立开关**（新会话取 default），
+ * 跨重启持久。按钮通过槽位 inject 拿到当前会话 id，所有状态读写都带 sessionId。
  */
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -44,14 +45,14 @@ const CHANGE_EVENT = 'dsh-concise:change'
 
 const zh = {
   toggleAria: '切换 Concise 输出风格',
-  tooltip: 'Concise 输出风格：结果先行、少废话，工作深浅不变（全局生效，影响新回复）',
+  tooltip: 'Concise 输出风格：结果先行、少废话，工作深浅不变（仅影响当前会话的新回复）',
   on: '开',
   off: '关',
   unknown: '…',
 }
 const en = {
   toggleAria: 'Toggle concise output style',
-  tooltip: 'Concise output style: results first, no filler — same work depth (global, affects new replies)',
+  tooltip: 'Concise output style: results first, no filler — same work depth (this session only, affects new replies)',
   on: 'ON',
   off: 'OFF',
   unknown: '…',
@@ -98,9 +99,10 @@ function findModelSeat(myRoot: HTMLElement): { row: HTMLElement; seat: HTMLEleme
   return null
 }
 
-async function fetchState(): Promise<boolean | null> {
+async function fetchState(sessionId: string | undefined): Promise<boolean | null> {
   try {
-    const response = await fetch(STATE_URL, { cache: 'no-store' })
+    const qs = sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''
+    const response = await fetch(STATE_URL + qs, { cache: 'no-store' })
     if (!response.ok) return null
     const data = await response.json() as { enabled?: unknown }
     return data.enabled === true
@@ -109,23 +111,24 @@ async function fetchState(): Promise<boolean | null> {
   }
 }
 
-const ConciseButton = ({ t }: { t: (key: string) => string }): React.ReactElement => {
+const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId?: string }): React.ReactElement => {
   const [enabled, setEnabled] = React.useState<boolean | null>(null)
   const [busy, setBusy] = React.useState(false)
 
   React.useEffect(() => {
     let disposed = false
-    void fetchState().then((value) => {
+    void fetchState(sessionId).then((value) => {
       if (!disposed && value !== null) setEnabled(value)
     })
     const refetch = () => {
-      void fetchState().then((value) => {
+      void fetchState(sessionId).then((value) => {
         if (value !== null) setEnabled(value)
       })
     }
     const onChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ enabled?: boolean }>).detail
-      if (detail && typeof detail.enabled === 'boolean') setEnabled(detail.enabled)
+      const detail = (event as CustomEvent<{ enabled?: boolean; sessionId?: string }>).detail
+      // 只接受同一会话的即时广播；其它会话的变化走轮询/focus 重取
+      if (detail && typeof detail.enabled === 'boolean' && detail.sessionId === sessionId) setEnabled(detail.enabled)
       else refetch()
     }
     const onVisible = () => {
@@ -145,18 +148,22 @@ const ConciseButton = ({ t }: { t: (key: string) => string }): React.ReactElemen
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener(CHANGE_EVENT, onChange)
     }
-  }, [])
+  }, [sessionId])
 
   const toggle = async (): Promise<void> => {
     if (busy) return
     setBusy(true)
     try {
-      const response = await fetch(TOGGLE_URL, { method: 'POST' })
+      const response = await fetch(TOGGLE_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(sessionId ? { sessionId } : {}),
+      })
       if (response.ok) {
         const data = await response.json() as { enabled?: unknown }
         const next = data.enabled === true
         setEnabled(next)
-        window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { enabled: next } }))
+        window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { enabled: next, sessionId } }))
       }
     } catch (error) {
       console.warn('[dsh-concise] toggle failed:', error)
@@ -193,7 +200,7 @@ const ConciseButton = ({ t }: { t: (key: string) => string }): React.ReactElemen
  * right 槽条目：自身仅渲染一个不可见的锚根（display:contents），
  * 真正的按钮 portal 到模型 seat 紧右侧；模型 seat 缺失时退化为原位渲染。
  */
-const ConciseSeat = ({ t }: { t: (key: string) => string }): React.ReactElement => {
+const ConciseSeat = ({ t, sessionId }: { t: (key: string) => string; sessionId?: string }): React.ReactElement => {
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [fallback, setFallback] = React.useState(false)
 
@@ -222,7 +229,7 @@ const ConciseSeat = ({ t }: { t: (key: string) => string }): React.ReactElement 
       }
       if (!portalRoot) {
         portalRoot = createRoot(anchor)
-        portalRoot.render(React.createElement(ConciseButton, { t }))
+        portalRoot.render(React.createElement(ConciseButton, { t, sessionId }))
       }
       if (observedRow !== found.row) {
         observer.disconnect()
@@ -268,10 +275,10 @@ const ConciseSeat = ({ t }: { t: (key: string) => string }): React.ReactElement 
         anchor = null
       }
     }
-  }, [t])
+  }, [t, sessionId])
 
   if (fallback) {
-    return React.createElement(ConciseButton, { t })
+    return React.createElement(ConciseButton, { t, sessionId })
   }
   return React.createElement('div', { ref: rootRef, style: { display: 'contents' }, 'data-dsh-concise-seat': '' })
 }
@@ -311,7 +318,7 @@ export function apply(ctx: ClientContext): void {
     }
   }, 'dsh-concise: client styles')
 
-  // 1) right 槽条目（锚点 + portal 落位到模型按钮右侧）
+  // 1) right 槽条目（锚点 + portal 落位到模型按钮右侧）；inject 把当前会话 id 传给组件
   ctx.effect(() => {
     try {
       return ctx.slots.inject('conversation.input.right', function* () {
@@ -320,7 +327,8 @@ export function apply(ctx: ClientContext): void {
           id: 'dsh-concise-toggle',
           order: 50,
           locale: NS,
-        }, () => React.createElement(ConciseSeat, { t }))
+          inject: (sessionId: string) => ({ sessionId }),
+        }, (props: { sessionId?: string }) => React.createElement(ConciseSeat, { t, sessionId: props?.sessionId }))
       })
     } catch (error) {
       console.error('[dsh-concise] right slot register failed', error)

@@ -1,11 +1,12 @@
 /**
  * dsh-concise host：
- * 1) 注册系统提示词 section（dsh-concise:style）——text 为函数，每次模型组装时按开关状态求值；
+ * 1) 注册系统提示词 section（dsh-concise:style）——text 为函数，每次模型组装时按"当前会话"的开关状态求值；
  *    关闭时返回空串，渲染层自动丢弃该 section（对 prompt 的增删即时生效）。
- * 2) 本地 HTTP API（/dsh-concise/api）：GET /state、POST /toggle、POST /set，供 client 开关按钮消费。
- * 3) host 命令 `/concise [on|off|status]`：slash 菜单与 CLI 会话均可切换/查询。
- * 4) 状态持久化：$DSH_HOME（缺省 ~/.dsh）/dsh-concise/state.json，原子写（tmp + rename），跨重启保留。
- * 5) 自定义风格：$DSH_HOME/dsh-concise/style.md 存在时覆盖内置文本（按 mtime 缓存，改完下轮生效）。
+ * 2) 会话级状态：每个会话独立开关，互不影响；新会话取 default（config defaultEnabled）。
+ * 3) 本地 HTTP API（/dsh-concise/api）：GET /state、POST /toggle、POST /set，均支持 sessionId。
+ * 4) host 命令 `/concise [on|off|status]`：作用于当前会话。
+ * 5) 状态持久化：$DSH_HOME（缺省 ~/.dsh）/dsh-concise/state.json，原子写（tmp + rename），跨重启保留。
+ * 6) 自定义风格：$DSH_HOME/dsh-concise/style.md 存在时覆盖内置文本（按 mtime 缓存，改完下轮生效）。
  *
  * 风格定义对齐 Claude Code 内置 "Concise" output style：
  * 「Claude leads with results and skips preamble and narration, while doing the work just as thoroughly.」
@@ -23,7 +24,7 @@ export const inject = ['systemPrompt', 'webServer', 'commands']
 
 /** Runtime schema（预留扩展位；当前无必填配置）。 */
 export const Config = z.object({
-  /** 新装默认是否开启 Concise（默认关闭，与 Claude Code 默认输出风格一致）。 */
+  /** 新会话的默认状态（默认关闭，与 Claude Code 默认输出风格一致）。 */
   defaultEnabled: z.boolean().default(false),
 })
 
@@ -45,8 +46,19 @@ const SECTION_NAME = 'dsh-concise:style'
 /** Persona=0 之后、越靠前模型越早读到；40 安全避开 harness(-100)/persona(0)。 */
 const SECTION_ORDER = 40
 
-interface StateStore {
+/** 会话条目上限：超出时按最近使用淘汰，防 state.json 无界增长。 */
+const MAX_SESSION_ENTRIES = 500
+
+interface SessionEntry {
   enabled: boolean
+  at: number
+}
+
+interface StateStore {
+  /** 新会话默认状态（无会话上下文的组装、以及不带 sessionId 的 API 调用落到这里）。 */
+  default: boolean
+  /** 每会话覆盖。 */
+  sessions: Record<string, SessionEntry>
 }
 
 function pluginDir(): string {
@@ -65,14 +77,38 @@ function styleFile(): string {
 
 function loadState(defaultEnabled: boolean): StateStore {
   try {
-    const raw = JSON.parse(readFileSync(stateFile(), 'utf8')) as { enabled?: unknown }
-    return { enabled: raw.enabled === true }
+    const raw = JSON.parse(readFileSync(stateFile(), 'utf8')) as {
+      default?: unknown
+      enabled?: unknown
+      sessions?: Record<string, unknown>
+    }
+    const sessions: Record<string, SessionEntry> = {}
+    for (const [sid, value] of Object.entries(raw.sessions ?? {})) {
+      if (typeof value === 'boolean') {
+        sessions[sid] = { enabled: value, at: 0 }
+        continue
+      }
+      if (value && typeof value === 'object' && typeof (value as SessionEntry).enabled === 'boolean') {
+        sessions[sid] = { enabled: (value as SessionEntry).enabled === true, at: Number((value as SessionEntry).at) || 0 }
+      }
+    }
+    return {
+      // 0.2.0 旧格式的 enabled 字段迁移为 default
+      default: raw.default === true || (raw.default === undefined && raw.enabled === true),
+      sessions,
+    }
   } catch {
-    return { enabled: defaultEnabled === true }
+    return { default: defaultEnabled === true, sessions: {} }
   }
 }
 
 function saveState(state: StateStore): void {
+  // 淘汰最旧的会话条目，防无界增长
+  const entries = Object.entries(state.sessions)
+  if (entries.length > MAX_SESSION_ENTRIES) {
+    entries.sort((a, b) => (b[1].at || 0) - (a[1].at || 0))
+    state.sessions = Object.fromEntries(entries.slice(0, MAX_SESSION_ENTRIES))
+  }
   const file = stateFile()
   mkdirSync(dirname(file), { recursive: true })
   const tmp = file + '.tmp-' + process.pid
@@ -121,6 +157,7 @@ interface SystemPromptLike {
 }
 interface CommandInvocation {
   rawInput: string
+  agent?: { session?: { id?: unknown } }
 }
 interface CommandsLike {
   register: (command: {
@@ -138,6 +175,12 @@ interface HostContext {
   effect: (fn: () => unknown | (() => void), label?: string) => void
 }
 
+/** 从模型组装上下文 / 命令调用里提取会话 id（对齐 dsh-plan-mode 的 context.agent.session 访问路径）。 */
+function sessionIdOf(source: unknown): string | null {
+  const sid = (source as { agent?: { session?: { id?: unknown } } } | undefined)?.agent?.session?.id
+  return typeof sid === 'string' && sid.length > 0 && sid.length <= 512 ? sid : null
+}
+
 async function readJsonBody(req: RouteRequest): Promise<Record<string, unknown>> {
   const chunks: unknown[] = []
   await new Promise<void>((resolve, reject) => {
@@ -153,18 +196,24 @@ async function readJsonBody(req: RouteRequest): Promise<Record<string, unknown>>
   }
 }
 
-const USAGE = 'Usage: /concise [on|off|status]'
-
 /**
- * 挂载 Concise 输出风格：提示词 section + 开关 API + host 命令 + 持久化。
- * @param ctx - host 根上下文（全局层，作用于所有会话的后续模型组装）。
- * @param config - 插件配置（defaultEnabled）。
+ * 挂载 Concise 输出风格：提示词 section + 会话级开关 + API + host 命令 + 持久化。
+ * @param ctx - host 根上下文。
+ * @param config - 插件配置（defaultEnabled 决定新会话默认状态）。
  */
 export function apply(ctx: HostContext, config: ConfigType = {}): void {
   const state = loadState(config.defaultEnabled ?? false)
   const log = ctx.logger ?? {}
 
-  const persist = (): void => {
+  const isEnabled = (sessionId: string | null): boolean =>
+    sessionId === null ? state.default : (state.sessions[sessionId]?.enabled ?? state.default)
+
+  const setEnabled = (sessionId: string | null, enabled: boolean): void => {
+    if (sessionId === null) {
+      state.default = enabled
+    } else {
+      state.sessions[sessionId] = { enabled, at: Date.now() }
+    }
     try {
       saveState(state)
     } catch (error) {
@@ -172,91 +221,96 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
     }
   }
 
-  // 1) 系统提示词 section：text 每次组装求值，关闭时空串被渲染层丢弃
+  // 1) 系统提示词 section：text 每次组装求值，按"正在组装的会话"取开关；关闭时空串被渲染层丢弃
   if (ctx.systemPrompt) {
     ctx.effect(() => ctx.systemPrompt!.section({
       name: SECTION_NAME,
       order: SECTION_ORDER,
-      text: () => (state.enabled ? activeStyle().text : ''),
+      text: (context) => {
+        const sid = sessionIdOf(context)
+        return isEnabled(sid) ? activeStyle().text : ''
+      },
     }), 'dsh-concise: prompt section')
   } else {
     log.warn?.('[dsh-concise] systemPrompt service missing — style injection disabled')
   }
 
-  // 2) host 命令 /concise：slash 菜单与 CLI 会话的切换入口（对齐 Claude Code /output-style）
+  // 2) host 命令 /concise：作用于当前会话
   if (ctx.commands) {
     ctx.effect(() => ctx.commands!.register({
       name: 'concise',
-      description: 'toggle the Concise output style (results first, no filler)',
+      description: 'toggle the Concise output style for this session (results first, no filler)',
       input: { hint: '[on|off|status]', images: false },
       handler: (invocation: CommandInvocation) => {
+        const sid = sessionIdOf(invocation)
         const arg = invocation.rawInput.trim().toLowerCase()
+        const statusText = (): string => {
+          const style = activeStyle()
+          return 'Concise output style: ' + (isEnabled(sid) ? 'ON' : 'OFF')
+            + '\nScope: this session only'
+            + '\nStyle source: ' + style.source + (style.source === 'custom' ? ' (' + styleFile() + ')' : '')
+            + '\n\nToggle: /concise, /concise on, /concise off'
+        }
+        const flipText = (): { kind: 'success'; text: string } => ({
+          kind: 'success',
+          text: isEnabled(sid)
+            ? 'Concise output style ENABLED for THIS session — replies lead with results and skip preamble/narration. Effective on the next turn.'
+            : 'Concise output style DISABLED for THIS session — replies return to the model\'s natural style. Effective on the next turn.',
+        })
         if (arg === '' || arg === 'toggle') {
-          state.enabled = !state.enabled
-          persist()
-          log.info?.('[dsh-concise] concise style ' + (state.enabled ? 'enabled' : 'disabled') + ' (via /concise)')
-          return {
-            kind: 'success',
-            text: state.enabled
-              ? 'Concise output style ENABLED — replies lead with results and skip preamble/narration. Effective on the next turn.'
-              : 'Concise output style DISABLED — replies return to the model\'s natural style. Effective on the next turn.',
-          }
+          setEnabled(sid, !isEnabled(sid))
+          log.info?.('[dsh-concise] session ' + (sid ?? 'default') + ' concise ' + (isEnabled(sid) ? 'enabled' : 'disabled'))
+          return flipText()
         }
         if (arg === 'on' || arg === 'off') {
-          state.enabled = arg === 'on'
-          persist()
-          log.info?.('[dsh-concise] concise style ' + (state.enabled ? 'enabled' : 'disabled') + ' (via /concise)')
-          return {
-            kind: 'success',
-            text: state.enabled
-              ? 'Concise output style ENABLED — replies lead with results and skip preamble/narration. Effective on the next turn.'
-              : 'Concise output style DISABLED — replies return to the model\'s natural style. Effective on the next turn.',
-          }
+          setEnabled(sid, arg === 'on')
+          log.info?.('[dsh-concise] session ' + (sid ?? 'default') + ' concise ' + (isEnabled(sid) ? 'enabled' : 'disabled'))
+          return flipText()
         }
-        if (arg === 'status') {
-          const style = activeStyle()
-          return {
-            kind: 'success',
-            text: [
-              'Concise output style: ' + (state.enabled ? 'ON' : 'OFF'),
-              'Style source: ' + style.source + (style.source === 'custom' ? ' (' + styleFile() + ')' : ''),
-              '',
-              'Toggle: /concise, /concise on, /concise off',
-            ].join('\n'),
-          }
-        }
-        return { kind: 'error', text: 'Unknown argument: ' + arg + '\n' + USAGE }
+        if (arg === 'status') return { kind: 'success', text: statusText() }
+        return { kind: 'error', text: 'Unknown argument: ' + arg + '\nUsage: /concise [on|off|status]' }
       },
     }), 'dsh-concise: /concise command')
   } else {
     log.warn?.('[dsh-concise] commands service missing — /concise command disabled')
   }
 
-  // 3) 本地 HTTP API（client 按钮消费；仅本机回环）
+  // 3) 本地 HTTP API（client 按钮消费；仅本机回环）。带 sessionId 操作该会话，不带则操作新会话默认值。
   if (ctx.webServer) {
     ctx.effect(() => ctx.webServer!.register({
       kind: 'prefix',
       path: '/dsh-concise/api',
       handler: async (req: RouteRequest, res: RouteResponse) => {
-        const path = new URL(req.url ?? '/', 'http://localhost').pathname.replace(/^\/dsh-concise\/api/, '') || '/'
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const path = url.pathname.replace(/^\/dsh-concise\/api/, '') || '/'
         const method = (req.method ?? 'GET').toUpperCase()
+        const sidFrom = (body: Record<string, unknown>): string | null => {
+          const sid = body.sessionId ?? url.searchParams.get('sessionId')
+          return typeof sid === 'string' && sid.length > 0 && sid.length <= 512 ? sid : null
+        }
         if ((path === '/state' || path.startsWith('/state?')) && method === 'GET') {
+          const sid = sidFrom({})
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ enabled: state.enabled }))
+          res.end(JSON.stringify({ enabled: isEnabled(sid), scoped: sid !== null, sessionId: sid }))
           return
         }
         if ((path === '/toggle' || path === '/set') && method === 'POST') {
-          const body = path === '/set' ? await readJsonBody(req) : {}
+          const body = await readJsonBody(req)
+          const sid = sidFrom(body)
           if (path === '/set') {
             const wanted = body.enabled
-            if (typeof wanted === 'boolean') state.enabled = wanted
+            if (typeof wanted !== 'boolean') {
+              res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+              res.end(JSON.stringify({ error: 'body.enabled must be a boolean' }))
+              return
+            }
+            setEnabled(sid, wanted)
           } else {
-            state.enabled = !state.enabled
+            setEnabled(sid, !isEnabled(sid))
           }
-          persist()
-          log.info?.('[dsh-concise] concise style ' + (state.enabled ? 'enabled' : 'disabled'))
+          log.info?.('[dsh-concise] ' + (sid ?? 'default') + ' concise ' + (isEnabled(sid) ? 'enabled' : 'disabled'))
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ enabled: state.enabled }))
+          res.end(JSON.stringify({ enabled: isEnabled(sid), scoped: sid !== null, sessionId: sid }))
           return
         }
         res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })

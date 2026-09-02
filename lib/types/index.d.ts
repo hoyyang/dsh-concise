@@ -5,10 +5,10 @@ export declare const name = "dsh-concise";
 export declare const inject: string[];
 /** Runtime schema（预留扩展位；当前无必填配置）。 */
 export declare const Config: z<Schemastery.ObjectS<{
-    /** 新装默认是否开启 Concise（默认关闭，与 Claude Code 默认输出风格一致）。 */
+    /** 新会话的默认状态（默认关闭，与 Claude Code 默认输出风格一致）。 */
     defaultEnabled: z<boolean, boolean>;
 }>, Schemastery.ObjectT<{
-    /** 新装默认是否开启 Concise（默认关闭，与 Claude Code 默认输出风格一致）。 */
+    /** 新会话的默认状态（默认关闭，与 Claude Code 默认输出风格一致）。 */
     defaultEnabled: z<boolean, boolean>;
 }>>;
 export type ConfigType = {
@@ -41,6 +41,11 @@ interface SystemPromptLike {
 }
 interface CommandInvocation {
     rawInput: string;
+    agent?: {
+        session?: {
+            id?: unknown;
+        };
+    };
 }
 interface CommandsLike {
     register: (command: {
@@ -68,9 +73,9 @@ interface HostContext {
     effect: (fn: () => unknown | (() => void), label?: string) => void;
 }
 /**
- * 挂载 Concise 输出风格：提示词 section + 开关 API + host 命令 + 持久化。
- * @param ctx - host 根上下文（全局层，作用于所有会话的后续模型组装）。
- * @param config - 插件配置（defaultEnabled）。
+ * 挂载 Concise 输出风格：提示词 section + 会话级开关 + API + host 命令 + 持久化。
+ * @param ctx - host 根上下文。
+ * @param config - 插件配置（defaultEnabled 决定新会话默认状态）。
  */
 export declare function apply(ctx: HostContext, config?: ConfigType): void;
 export {};

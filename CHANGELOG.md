@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-09-02
+
+### Changed
+
+- **Scope: per-session.** The toggle now affects only the session it is
+  toggled in — each session remembers its own state, sessions stay
+  independent, and new sessions start from a configurable default
+  (`defaultEnabled`, off by default). The section text resolves the
+  assembling session via `context.agent.session.id`.
+
+### Added
+
+- Session-scoped API: `GET /state`, `POST /toggle`, `POST /set` accept a
+  `sessionId` (query or body); calls without one operate on the new-session
+  default. `/concise` operates on the invoking session.
+- Session-state persistence with 500-entry LRU pruning, plus automatic
+  migration of the 0.2.0 single-switch state file.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added
@@ -40,5 +58,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - zh/en locale dictionaries with built-in fallback labels.
 - Accessibility: `aria-pressed` toggle semantics and localized tooltips.
 
+[0.3.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.0
 [0.2.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.2.0
 [0.1.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.1.0

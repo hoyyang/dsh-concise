@@ -35,7 +35,7 @@ dsh plugin add https://github.com/hoyyang/dsh-concise/releases/latest/download/d
 - **Claude 同款风格**：完整移植 Claude Code 内置 "Concise" output style 的行为定义（结果先行、跳过开场白与旁白、不重复收尾）
 - **工作深浅不变**：只约束表达方式——调查、验证、多角度审查照旧，绝不因简洁而牺牲严谨
 - **下一轮即生效**：通过系统提示词 section 动态注入，切换后无需重开会话、无需重启
-- **全局生效**：所有会话（含子代理与 CLI 会话）的后续回复统一应用当前风格，团队/个人口径一致
+- **按会话独立生效**：开关只影响当前会话的新回复，会话之间互不干扰（新会话默认关闭，可用配置 `defaultEnabled` 调整）
 - **跨重启持久**：开关状态原子写入 `~/.dsh/dsh-concise/state.json`，重启后保持
 - **状态自动同步**：按钮以 15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，`/concise`、API、其它标签页的改动 ≤15s 自动跟上，无需刷新
 - **可视化状态**：开启态 Claude 橙描边 + 实心圆点 + 「开」，关闭态中性灰 + 空心点，一眼可辨
@@ -153,7 +153,7 @@ curl -X POST -H 'content-type: application/json' \
 - **方案与架构讨论**：先给决策与一句话理由，备选方案只在有实质差异时提及
 - **命令行 / 运维协作**：命令与路径原样保留，解释压到最短
 - **多轮长会话**：累积上下文时省掉每轮的寒暄与复述 token
-- **团队口径统一**：共享实例上全局开关，所有人拿到的回复风格一致
+- **工作区隔离验证**：给正在跑别的任务的会话开 Concise，不影响其它会话的输出风格
 - **给别的模型当风格基线**：配合模型切换按钮使用，任何模型都套同一输出风格
 - **自动化流水线**：用 `/toggle`、`/set` API 让脚本按阶段切换输出风格（如生成阶段简洁、评审阶段自然）
 - **演示与教学录制**：录屏时回复紧凑，画面信息密度更高
@@ -164,13 +164,13 @@ curl -X POST -H 'content-type: application/json' \
 
 | 层 | 机制 |
 | --- | --- |
-| 提示词注入 | `systemPrompt.section({ name: 'dsh-concise:style', order: 40 })`，text 为函数、每次模型组装求值；关闭时返回空串，渲染层自动丢弃该 section |
-| host 命令 | `commands.register({ name: 'concise' })`：`/concise [on\|off\|status]`，slash 菜单自动收录，CLI 会话同样可执行 |
+| 提示词注入 | `systemPrompt.section({ name: 'dsh-concise:style', order: 40 })`，text 为函数、每次模型组装按 `context.agent.session.id` 取当前会话开关求值；关闭时返回空串，渲染层自动丢弃该 section |
+| host 命令 | `commands.register({ name: 'concise' })`：`/concise [on\|off\|status]`，作用于当前会话，slash 菜单自动收录，CLI 会话同样可执行 |
 | 自定义风格 | `$DSH_HOME/dsh-concise/style.md` 非空时覆盖内置文本，mtime 缓存按次求值，改完即生效 |
-| 开关 API | `webServer.register` 前缀路由 `/dsh-concise/api`：`GET /state`、`POST /toggle`、`POST /set`（仅本机回环） |
+| 开关 API | `webServer.register` 前缀路由 `/dsh-concise/api`：`GET /state`、`POST /toggle`、`POST /set`，带 `sessionId` 操作该会话，不带则操作新会话默认值（仅本机回环） |
+| 会话级状态 | `$DSH_HOME/dsh-concise/state.json`：`default` + 每会话覆盖（500 条 LRU 淘汰），tmp + rename 原子写 |
 | UI 落位 | client 模块注册 `conversation.input.right` 槽作锚点，把按钮 portal 到模型 seat 紧右侧，`MutationObserver` 维持相对位置；React 重渲染/seat 重建后自动对位 |
-| 状态持久化 | `$DSH_HOME`（缺省 `~/.dsh`）/ `dsh-concise/state.json`，tmp + rename 原子写 |
-| 状态同步 | toggle 后广播 `dsh-concise:change` 自定义事件；15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，覆盖命令行/API 入口的状态变更 |
+| 状态同步 | toggle 后按会话广播 `dsh-concise:change` 自定义事件；15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，覆盖命令行/API/其它会话入口的状态变更 |
 
 ### 设计细节
 
@@ -204,10 +204,10 @@ curl -X POST -H 'content-type: application/json' \
 不会。提示词明确约束"工作深浅不变"（investigate、verify、double-check 照旧），只压缩表达——该查证的照常查证，该给出的命令/路径/风险一字不少。
 
 **和直接在 AGENTS.md 里写"请简洁回复"有什么区别？**
-一是开关粒度：随时一键切换，不用改文件、不用重载；二是作用层级：本插件注入的是系统提示词 section，优先级和稳定性高于项目级指令，且不会污染你的项目配置；三是全局一致性：所有会话、所有模型统一生效。
+一是开关粒度：随时一键切换、只作用于当前会话，不用改文件、不用重载；二是作用层级：本插件注入的是系统提示词 section，优先级和稳定性高于项目级指令，且不会污染你的项目配置；三是模型无关：任何模型都套同一输出风格。
 
 **开关是全局的还是按会话的？**
-全局。这与 Claude Code 的 output style 语义一致——输出风格是个人/团队偏好，不是会话属性。切换后所有会话的下一轮回复即生效。
+**按会话。** 每个会话独立记忆自己的开关状态，互不影响；新会话默认关闭（可用插件配置 `defaultEnabled: true` 让新会话默认开启）。切换后当前会话的下一轮回复即生效，其它会话不受影响。
 
 **支持暗色主题吗？**
 支持。样式全部使用 dsh 的 `--dsw-alias-*` 设计令牌与少量半透明品牌色，明暗主题下均可读。

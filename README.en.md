@@ -29,8 +29,8 @@ dsh plugin add hoyyang/dsh-concise
 - **Claude's Concise style**: results first, no preamble, no narration, no filler closers
 - **Same work depth**: only reporting is compressed — never the rigor
 - **Effective on the next turn** via a dynamic system-prompt section (no restart, no session reload)
-- **Global scope**: consistent style across every session, including subagents and CLI sessions
-- **Persistent**: atomic state file survives restarts
+- **Per-session scope**: the toggle only affects the current session's new replies — sessions stay independent (new sessions default off, configurable via `defaultEnabled`)
+- **Persistent**: per-session state survives restarts (atomic writes)
 - **Auto re-sync**: the button polls lightly every 15 s (visible tab only) plus on focus/visibility, so `/concise`, API, or other-tab changes are reflected without reload
 - **Clear visual state**: Claude-orange outline + solid dot when on, neutral grey when off
 - **Accessible**: `aria-pressed` toggle semantics, zh/en localized tooltip
@@ -73,8 +73,8 @@ Custom style: put your own text in `~/.dsh/dsh-concise/style.md` to fully replac
 | Custom style | `$DSH_HOME/dsh-concise/style.md` overrides the built-in text when non-empty; mtime-cached per assembly |
 | Toggle API | `webServer.register` prefix route `/dsh-concise/api`: `GET /state`, `POST /toggle`, `POST /set` (loopback only) |
 | UI placement | client module anchors in the `conversation.input.right` slot and portals the button right of the model seat, kept in place by a `MutationObserver` |
-| Persistence | `$DSH_HOME` (default `~/.dsh`) `/dsh-concise/state.json`, atomic tmp+rename write |
-| State sync | `dsh-concise:change` DOM event on toggle + 15 s light polling (visible tab) + focus/visibility refetch |
+| Per-session state | `$DSH_HOME/dsh-concise/state.json`: `default` + per-session overrides (500-entry LRU), atomic tmp+rename write |
+| State sync | per-session `dsh-concise:change` DOM event on toggle + 15 s light polling (visible tab) + focus/visibility refetch |
 
 ## Use cases
 
