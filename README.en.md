@@ -23,6 +23,29 @@ dsh plugin add hoyyang/dsh-concise
 
 **Zero config** — no API keys, no accounts, no settings. Refresh the web UI after install and the toggle appears next to the model picker. Requires dsh web 0.1.0-rc.8+ (verified on 0.1.0-rc.8).
 
+## Toggle off vs on — same question, same model
+
+Asked "introduce JavaScript closures with one use case" in two sessions, differing only by the Concise toggle:
+
+![Before/after: off = a 1.2K-tok article, on = two sentences straight to the point](assets/before-after-zh.png)
+
+With Concise on you get:
+
+- **The answer is the first sentence** — no "Sure, let me explain…", no preamble, no narration
+- **Water is removed, substance is not** — commands, paths, risks, and next steps survive verbatim; what goes is recap, boilerplate closers, decorative sections
+- **Work depth unchanged** — investigation, verification, and double-checking happen exactly as before (it's written into the injected prompt)
+- **Long sessions save tokens** — the preamble and recaps you skip every turn add up
+
+In one line: **the answer didn't get smaller — the filler is gone.**
+
+## 30-second start
+
+1. Install, refresh the page
+2. Find the model picker in the composer tool row — the `● Concise` toggle sits right next to it
+3. Click it; the next reply follows the new style. Orange = on, grey = off
+
+The toggle is **per-session**: turning it on here doesn't touch your other sessions (new sessions start off; set `defaultEnabled: true` to change that).
+
 ## Features
 
 - **One-click toggle** next to the model selection button (`● Concise ON/OFF`)
@@ -43,7 +66,7 @@ dsh plugin add hoyyang/dsh-concise
 
 ## Usage
 
-Click the toggle; the next reply leads with the answer. Example (real output, toggle on, asked "explain HTTP 302 in one sentence"):
+Example (real output, toggle on, asked "explain HTTP 302 in one sentence"):
 
 > HTTP 302 is a redirect status code indicating the requested resource has temporarily moved to the URL in the Location header; the client should re-issue the request there while the original URL remains valid (unlike 301, search engines do not transfer ranking).
 
