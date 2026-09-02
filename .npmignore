@@ -1,0 +1,7 @@
+# npm pack 排除规则（files 白名单之外的额外排除）
+**/.*
+**/.*.ts
+.DS_Store
+*.tgz
+node_modules
+docs/*.html
