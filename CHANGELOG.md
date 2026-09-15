@@ -3,6 +3,93 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-09-15
+
+### Added
+
+- Plain-language digest card: with Concise on, EVERY reply opens with a
+  fixed-format blockquote — `> **摘要：** <2-3 plain sentences>` — restating
+  the turn's conclusion in plain words. The rule is MANDATORY (unconditional,
+  first rule of the style text, re-injected on every model assembly) so the
+  card triggers on every Concise-on turn. Guardrail: the digest may only
+  restate conclusions already present in the body (no new facts, trade-offs,
+  or analogies).
+- Client renderer enhancement: blockquotes starting with 摘要： are upgraded
+  to an engineering-blueprint card — white face with a faint grid (::before,
+  brightens on hover), four orange corner measurement brackets (::after, eight
+  gradient layers, drawn in on mount), monospace font stack at 1.18em, header
+  `DIGEST // 说人话`, and a real interaction: selecting any text inside the card
+  copies it on mouse-up (header flashes COPIED ✓). Implemented via a
+  document-subtree MutationObserver with rAF batching; classes, state and
+  listeners are removed cleanly on uninstall. Design reference:
+  `assets/style-digest-v07e.png` (generated with GPT-Image-2; v07 pastel,
+  v07b dark-glass and v07c warm-paper were rejected directions).
+
+### Changed
+
+- **Fork declaration**: dsh-concise is no longer a byte-parity port of Claude
+  Code's built-in Concise output style — it is now Claude Code Concise plus
+  this plugin's digest-card extension. Verified 2026-09-15 against Claude Code
+  2.1.272: upstream Concise is unchanged since 2.1.258, so nothing to re-sync.
+
+## [0.6.0] - 2026-09-14
+
+### Changed
+
+- Placement swap: the Concise toggle now portals immediately LEFT of the
+  prompt-enhancer entry (row order: Concise → ✦标准 pill → model picker).
+  dsh-improve-prompt is untouched — it simply sits where Concise used to be.
+- Expansion direction: inside the pill the DOM order is now [Concise
+  label][switch] — the switch stays pinned against the prompt-enhancer's left
+  side (right edge fixed) while the label expands to the left on hover or
+  keyboard focus. Label reveal uses a slight leftward drift and clips without
+  an ellipsis flash.
+
+### Fixed
+
+- Anchor resolution climbed from the prompt-enhancer element to its row-level
+  wrapper: the official right-slot renders multiple plugin entries inside one
+  shared container, so the previous child-wise probe skipped the container
+  (it also contains this plugin's own seat root) and the button silently fell
+  back to the old position. Resolution now starts from the `.dip-root`
+  element itself and walks up to the direct child of the tool row.
+
+## [0.5.0] - 2026-09-14
+
+### Added
+
+- Collapsed toggle: only the 30×16 switch shows by default; the Concise label
+  smoothly expands on hover or keyboard focus (max-width + opacity + translate
+  transitions). The button is absolutely positioned and right-anchored inside
+  a fixed-width placeholder, so expanding never shifts neighboring composer
+  controls — the right edge stays pinned and the pill grows leftward.
+- Expressive styling (design concept: `assets/style-concept-v05.png`, generated
+  with GPT-Image-2): glass shell with top highlight, Claude-orange aurora
+  gradient track (135°, #F0B08F → #D97757 → #C25E3F) with a breathing glow
+  while on, one-shot diagonal sheen sweep on hover, press-scale + springy knob
+  feedback. All motion disabled under `prefers-reduced-motion: reduce`; the
+  focus-visible ring stays intact in the on state.
+
+### Changed
+
+- Collapsed width ≈42 px (switch only); expanded ≈100 px while hovered.
+- README feature list updated for the collapsed interaction and new visuals.
+
+## [0.4.1] - 2026-09-14
+
+### Changed
+
+- Toggle placement moved into the left zone of the composer tool row: the
+  Concise button now portals immediately right of the dsh-improve-prompt
+  entry (the sparkle "标准/轻量" pill) — i.e. left of the model selection
+  buttons (official model picker and kiro model selector alike).
+- Resilient anchor resolution against concurrent restyles of improve-prompt:
+  exact `.dip-root` class, then a `dip-` class-prefix probe, then an
+  aria-label text match (增强提示词 / enhance prompt).
+- Fallback placement without improve-prompt: immediately left of the model
+  seat (same zone), replacing the old right-of-model position; the in-slot
+  last-resort fallback is unchanged.
+
 ## [0.4.0] - 2026-09-02
 
 ### Added
@@ -91,6 +178,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - zh/en locale dictionaries with built-in fallback labels.
 - Accessibility: `aria-pressed` toggle semantics and localized tooltips.
 
+[0.7.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.7.0
+[0.6.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.6.0
+[0.5.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.5.0
+[0.4.1]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.4.1
 [0.4.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.4.0
 [0.3.1]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.1
 [0.3.0]: https://github.com/hoyyang/dsh-concise/releases/tag/v0.3.0

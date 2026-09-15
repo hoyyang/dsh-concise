@@ -2,7 +2,7 @@
 
 ![banner](assets/banner.png)
 
-把 Claude Code 内置的 **Concise 输出风格** 带进 DeepSeek Harness（dsh）：composer 模型选择按钮右侧一键开关——**结果先行，少废话**，而调查、验证、多角度审查的工作深浅完全不变。
+基于 Claude Code 内置 **Concise 输出风格**（自 2.1.258 起上游未再变动）并加入本插件扩展，带进 DeepSeek Harness（dsh）：composer 工具行一键开关（「增强提示词」按钮紧左侧、模型选择按钮左侧区域）——**结果先行，少废话**，而调查、验证、多角度审查的工作深浅完全不变；开启后每轮回答开头必附「摘要」精华摘要卡（工程蓝图卡：极淡网格线 + 四角测量角标 + 等宽字体 1.18em，浅底深字；划选卡内文字松开即复制）。
 
 [**English**](README.en.md) · [Releases](https://github.com/hoyyang/dsh-concise/releases) · [更新日志](CHANGELOG.md)
 
@@ -43,7 +43,7 @@ dsh plugin add dsh-concise           # npm 包
 ## 30 秒上手
 
 1. 装好插件，刷新页面
-2. 在 composer 工具行找到模型选择按钮（如 `GLM-5.3 Flash`）——它右边就是 `● Concise` 开关
+2. 在 composer 工具行找到「✦ 标准/轻量」增强提示词按钮（dsh-improve-prompt）——`● Concise` 开关紧贴在它左边（开关的滑轨一侧挨着它），增强提示词按钮则在模型选择按钮（如 `GLM-5.3 Flash`）左边；未装增强提示词时，开关自动贴在模型按钮左侧
 3. 点一下，下一轮回复即生效。橙色 = 开，灰色 = 关
 
 ![composer 上的 Concise 开关（开启态）](assets/shot-hero-composer-zh.png)
@@ -95,7 +95,8 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 
 ## 功能一览
 
-- **一键开关**：composer 工具行模型选择按钮右侧的 `● Concise 开/关` 按钮，单击即切换
+- **一键开关（收起式）**：composer 工具行「增强提示词」按钮紧左侧的 `● Concise` 开关（行序 Concise → 增强提示词 → 模型选择），单击即切换；平时收起只显示滑轨，悬停或键盘聚焦时 Concise 文字向左平滑展开——Switch 紧贴增强提示词固定不动，右缘固定，不推动相邻按钮
+- **精华摘要卡（说人话）**：开启后**每轮回答**开头必附一张工程蓝图卡（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入（100% 触发口径，本插件对官方 Concise 的分叉扩展）
 - **`/concise` 命令**：slash 菜单与 CLI 会话均可 `/concise`（切换）、`/concise on|off`（显式设置）、`/concise status`（查状态与风格来源）——对齐 Claude Code 的 `/output-style`
 - **自定义风格**：把任意文本放进 `~/.dsh/dsh-concise/style.md` 即可整体覆盖内置风格文本（改完保存，下一轮组装即生效）——对齐 Claude Code 的 `/output-style:new`
 - **Claude 同款风格**：完整移植 Claude Code 内置 "Concise" output style 的行为定义（结果先行、跳过开场白与旁白、不重复收尾）
@@ -104,10 +105,10 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 - **按会话独立生效**：开关只影响当前会话的新回复，会话之间互不干扰（新会话默认关闭，可用配置 `defaultEnabled` 调整）
 - **跨重启持久**：开关状态原子写入 `~/.dsh/dsh-concise/state.json`，重启后保持
 - **状态自动同步**：按钮以 15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，`/concise`、API、其它标签页的改动 ≤15s 自动跟上，无需刷新
-- **可视化状态**：开启态 Claude 橙描边 + 实心圆点 + 「开」，关闭态中性灰 + 空心点，一眼可辨
+- **可视化状态**：开启态 Claude 橙极光渐变滑轨 + 呼吸辉光，关闭态中性玻璃，一眼可辨；悬停有流光扫过，按压有回弹反馈（`prefers-reduced-motion` 下动画全关）
 - **无障碍友好**：`aria-pressed` 开关语义 + 中英双语 tooltip 说明
 - **多标签页同步**：任意一个窗口切换后，同页其它开关实例经自定义事件即时同步
-- **UI 精准落位**：自动锚定模型选择按钮紧右侧（官方 right 槽实际渲染在模型按钮左侧，本插件做了位置修正）
+- **UI 精准落位**：自动锚定「增强提示词」条目（`div.dip-root`）紧左侧；未装时锚定模型按钮紧左侧（官方 right 槽实际渲染在模型按钮左侧，本插件以该区域为落位基准）
 - **优雅降级**：找不到模型按钮的异常布局下自动退化为原位渲染，功能不丢
 - **卸载即净**：提示词 section、HTTP 路由、host 命令、样式表全部随插件卸载移除，无残留
 - **本地化**：界面文案跟随 dsh 语言设置，内置中英双语兜底
@@ -137,12 +138,13 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 | 自定义风格 | `$DSH_HOME/dsh-concise/style.md` 非空时覆盖内置文本，mtime 缓存按次求值，改完即生效 |
 | 开关 API | `webServer.register` 前缀路由 `/dsh-concise/api`：`GET /state`、`POST /toggle`、`POST /set`，带 `sessionId` 操作该会话，不带则操作新会话默认值（仅本机回环） |
 | 会话级状态 | `$DSH_HOME/dsh-concise/state.json`：`default` + 每会话覆盖（500 条 LRU 淘汰），tmp + rename 原子写 |
-| UI 落位 | client 模块注册 `conversation.input.right` 槽作锚点，把按钮 portal 到模型 seat 紧右侧，`MutationObserver` 维持相对位置；React 重渲染/seat 重建后自动对位 |
+| UI 落位 | client 模块注册 `conversation.input.right` 槽作锚点，把按钮 portal 到「增强提示词」条目紧左侧（未装时模型 seat 紧左侧），`MutationObserver` 维持相对位置；React 重渲染/条目重建后自动对位 |
 | 状态同步 | toggle 后按会话广播 `dsh-concise:change` 自定义事件；15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，覆盖命令行/API/其它会话入口的状态变更 |
+| 精华摘要渲染 | 风格文本要求每轮回答以 `> **摘要：**` 引用块开头（无条件下发）；client 监听消息 DOM（subtree + rAF 合批），将以「摘要：」开头的 blockquote 升级为工程蓝图卡（极淡网格 ::before 悬停增亮 + 四角角标 ::after 入场画出 + 等宽 1.18em + 划选复制交互（mouseup 读取卡内选区），概念图 assets/style-digest-v07e.png）；卸载即净 |
 
 ### 设计细节
 
-- **为什么不用官方 right 槽直接放按钮？** 实测官方 `conversation.input.right` 列表槽渲染在模型按钮**左侧**（与其文档描述相反）。本插件以槽位条目为自定位锚点，将 portal 容器插入模型 seat 的紧右侧，并保持会话切换/重渲染后的位置正确。
+- **为什么不用官方 right 槽直接放按钮？** 实测官方 `conversation.input.right` 列表槽渲染在模型按钮**左侧**（与其文档描述相反）。本插件以槽位条目为自定位锚点：首选把 portal 容器插入「增强提示词」条目的紧左侧（识别链：`.dip-root` 精确类名 → `dip-` 类名前缀 → aria-label 文本，防其它插件独立改版导致失锚）；未装时插入模型 seat 紧左侧，并保持会话切换/重渲染后的位置正确。
 - **为什么 text 用函数而不是注册/注销 section？** 函数式 text 让"开关"只是求值结果的变化，不触碰 slot 注册表，避免与其它插件的注册时序竞争。
 - **权限模型**：API 只绑定本机回环；提示词注入不触碰任何工具 schema，不影响会话权限模式。
 
@@ -156,7 +158,8 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 - 自定义风格端到端：style.md 写入后请求实测携带自定义文本且内置文本 0 命中（完全替换）；删除后恢复内置；回复实测遵循自定义指令（恰合一句、无列表）
 - `/concise` 命令矩阵：toggle / on / off / status 四路径实测通过，slash 菜单正确收录与执行
 - 回复风格实测：解释类问答开启后直接以结论开头，无开场白、无收尾复述
-- UI 落位断言：composer 工具行 DOM 顺序为 `[模型选择][Concise][上下文][发送]`
+- 精华摘要卡断言（jsdom）：以「摘要：」开头的 blockquote 打上卡片样式类，普通引用块不误伤，卸载后样式类全部摘除
+- UI 落位断言：composer 工具行 DOM 顺序为 `[Concise][增强提示词][模型选择][发送]`（未装增强提示词时为 `[Concise][模型选择][发送]`）
 - 交互断言：单击翻转状态、`aria-pressed` 同步、按钮文案与状态一致
 - 跨入口同步断言：API 翻转后按钮 ≤15s 自动跟上（轮询实测），focus/visibility 重取生效
 - 持久化断言：切换后 `state.json` 即时落盘，页面刷新后状态一致
