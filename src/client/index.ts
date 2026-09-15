@@ -418,16 +418,17 @@ export function apply(ctx: ClientContext): void {
     }
   }, 'dsh-concise: client styles')
 
-  // 0.5) 精华摘要卡渲染增强（v0.7）：消息流里以「摘要：」开头的 blockquote → 打样式类变圆角高亮卡。
+  // 0.5) 精华摘要卡渲染增强（v0.8）：消息流里以「摘要：」开头的 blockquote → 打样式类变圆角高亮卡。
+  // 兼容 0.7 之前旧标签「说人话：」的历史消息（否则旧会话卡片永久退化为普通引用块）。
   // 监听 body 子树（markdown 重渲染频繁，rAF 合批）；匹配按 tag+文本前缀，不命中不加样式（原生引用块兜底）。
   ctx.effect(() => {
     if (typeof document === 'undefined') return
-    const MARK = '摘要：'
+    const MARK_RE = /^(摘要：|说人话：)/
     let queued = 0
     const scan = (): void => {
       queued = 0
       for (const bq of Array.from(document.querySelectorAll('blockquote'))) {
-        const hit = (bq.textContent ?? '').trimStart().startsWith(MARK)
+        const hit = MARK_RE.test((bq.textContent ?? '').trimStart())
         bq.classList.toggle('dsh-concise-digest', hit)
         if (hit && !bq.title) bq.title = '划选卡内文字，松开即复制'
       }

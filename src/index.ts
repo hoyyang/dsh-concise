@@ -19,8 +19,10 @@ import z from '@deepseek-ai/schemastery'
 /** Cordis plugin name. */
 export const name = 'dsh-concise'
 
-/** Required services: the system prompt registry, the web server route table, and the host command registry. */
-export const inject = ['systemPrompt', 'webServer', 'commands']
+/** Required services: the system prompt registry and the host command registry.
+ *  webServer 不列入 inject：headless/CLI 等 profile 没有该服务，硬性等待会导致插件永远 pending。
+ *  apply() 内对 ctx.webServer 做防御性判空（缺失时仅降级 API，风格注入不受影响）。 */
+export const inject = ['systemPrompt', 'commands']
 
 /** Runtime schema（预留扩展位；当前无必填配置）。 */
 export const Config = z.object({
@@ -33,7 +35,7 @@ export type ConfigType = { defaultEnabled?: boolean }
 /** Concise 输出风格正文：注入 system prompt 的实际内容（无 style.md 覆盖时使用）。 */
 export const CONCISE_STYLE_TEXT = [
   'Concise output style (active): lead with the result. Put the answer, the decision, or the finished artifact in the first sentence or two; explanation follows only as needed.',
-  '- MANDATORY on every reply, no exceptions: BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).',
+  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).',
   '- Never open by restating the question or with pleasantries ("Sure", "Great question", "好的", "当然可以") — the first line is already the answer or the key finding.',
   '- Skip filler closers: no recap of what you just did, no "In summary" restating the response, no boilerplate apologies or hedges, no closing offers ("需要我…吗？") unless a decision is genuinely required.',
   '- For enumerable facts prefer a table or a tight list over paragraphs — structure is not verbosity; compact and structured beats long and prosy.',
@@ -47,6 +49,10 @@ export const CONCISE_STYLE_TEXT = [
 const SECTION_NAME = 'dsh-concise:style'
 /** Persona=0 之后、越靠前模型越早读到；40 安全避开 harness(-100)/persona(0)。 */
 const SECTION_ORDER = 40
+/** 尾部提醒 section：system prompt 末尾再敲一次「最终回复必附摘要」，对冲长 prompt 下的遵循衰减。 */
+const REMINDER_SECTION_NAME = 'dsh-concise:reminder'
+const REMINDER_SECTION_ORDER = 900
+const REMINDER_TEXT = 'REMINDER (Concise output style): when this turn ends with a user-facing final reply, BEGIN it with the 摘要 digest blockquote exactly as defined in the Concise output style section above ("> **摘要：** …"). Intermediate step narration between tool calls is exempt.'
 
 /** 会话条目上限：超出时按最近使用淘汰，防 state.json 无界增长。 */
 const MAX_SESSION_ENTRIES = 500
@@ -105,11 +111,15 @@ function loadState(defaultEnabled: boolean): StateStore {
 }
 
 function saveState(state: StateStore): void {
-  // 淘汰最旧的会话条目，防无界增长
+  // 淘汰最旧的会话条目，防无界增长；先淘汰与 default 同值的冗余条目，
+  // 显式翻转过用户意图的条目（enabled ≠ default）尽量保留，避免静默回退到默认态
   const entries = Object.entries(state.sessions)
   if (entries.length > MAX_SESSION_ENTRIES) {
-    entries.sort((a, b) => (b[1].at || 0) - (a[1].at || 0))
-    state.sessions = Object.fromEntries(entries.slice(0, MAX_SESSION_ENTRIES))
+    const byOldest = (a: [string, SessionEntry], b: [string, SessionEntry]): number => (a[1].at || 0) - (b[1].at || 0)
+    const meaningful = entries.filter(([, v]) => v.enabled !== state.default).sort(byOldest).slice(0, MAX_SESSION_ENTRIES)
+    const room = MAX_SESSION_ENTRIES - meaningful.length
+    const redundant = room > 0 ? entries.filter(([, v]) => v.enabled === state.default).sort(byOldest).slice(0, room) : []
+    state.sessions = Object.fromEntries(meaningful.concat(redundant))
   }
   const file = stateFile()
   mkdirSync(dirname(file), { recursive: true })
@@ -171,10 +181,11 @@ interface CommandsLike {
 }
 interface HostContext {
   systemPrompt?: SystemPromptLike
-  webServer?: WebServerLike
   commands?: CommandsLike
   logger?: { info?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
   effect: (fn: () => unknown | (() => void), label?: string) => void
+  /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
+  inject: (deps: string[], callback: (scoped: { webServer: WebServerLike }) => unknown) => unknown
 }
 
 /** 从模型组装上下文 / 命令调用里提取会话 id（对齐 dsh-plan-mode 的 context.agent.session 访问路径）。 */
@@ -233,6 +244,14 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
         return isEnabled(sid) ? activeStyle().text : ''
       },
     }), 'dsh-concise: prompt section')
+    ctx.effect(() => ctx.systemPrompt!.section({
+      name: REMINDER_SECTION_NAME,
+      order: REMINDER_SECTION_ORDER,
+      text: (context) => {
+        const sid = sessionIdOf(context)
+        return isEnabled(sid) ? REMINDER_TEXT : ''
+      },
+    }), 'dsh-concise: reminder section')
   } else {
     log.warn?.('[dsh-concise] systemPrompt service missing — style injection disabled')
   }
@@ -278,8 +297,10 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
   }
 
   // 3) 本地 HTTP API（client 按钮消费；仅本机回环）。带 sessionId 操作该会话，不带则操作新会话默认值。
-  if (ctx.webServer) {
-    ctx.effect(() => ctx.webServer!.register({
+  //    webServer 是可选服务（headless/CLI 等 profile 没有它）：用 ctx.inject 回调按需装配——
+  //    服务可用才注册，永不 pending；随本插件 fiber 卸载即净。缺失时仅 API 降级（/concise 命令仍可用）。
+  ctx.effect(() => ctx.inject(['webServer'], (scoped) => {
+    const dispose = scoped.webServer.register({
       kind: 'prefix',
       path: '/dsh-concise/api',
       handler: async (req: RouteRequest, res: RouteResponse) => {
@@ -318,8 +339,8 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
         res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: 'not found' }))
       },
-    }), 'dsh-concise: http api')
-  } else {
-    log.warn?.('[dsh-concise] webServer service missing — toggle API disabled')
-  }
+    })
+    log.info?.('[dsh-concise] http api attached (webServer available)')
+    return dispose
+  }), 'dsh-concise: http api')
 }

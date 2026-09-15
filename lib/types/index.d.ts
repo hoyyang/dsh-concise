@@ -1,7 +1,9 @@
 import z from '@deepseek-ai/schemastery';
 /** Cordis plugin name. */
 export declare const name = "dsh-concise";
-/** Required services: the system prompt registry, the web server route table, and the host command registry. */
+/** Required services: the system prompt registry and the host command registry.
+ *  webServer 不列入 inject：headless/CLI 等 profile 没有该服务，硬性等待会导致插件永远 pending。
+ *  apply() 内对 ctx.webServer 做防御性判空（缺失时仅降级 API，风格注入不受影响）。 */
 export declare const inject: string[];
 /** Runtime schema（预留扩展位；当前无必填配置）。 */
 export declare const Config: z<Schemastery.ObjectS<{
@@ -63,7 +65,6 @@ interface CommandsLike {
 }
 interface HostContext {
     systemPrompt?: SystemPromptLike;
-    webServer?: WebServerLike;
     commands?: CommandsLike;
     logger?: {
         info?: (...args: unknown[]) => void;
@@ -71,6 +72,10 @@ interface HostContext {
         error?: (...args: unknown[]) => void;
     };
     effect: (fn: () => unknown | (() => void), label?: string) => void;
+    /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
+    inject: (deps: string[], callback: (scoped: {
+        webServer: WebServerLike;
+    }) => unknown) => unknown;
 }
 /**
  * 挂载 Concise 输出风格：提示词 section + 会话级开关 + API + host 命令 + 持久化。

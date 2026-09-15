@@ -2,7 +2,7 @@
 
 ![banner](assets/banner.png)
 
-Based on Claude Code's built-in **Concise output style** (unchanged upstream since 2.1.258) plus this plugin's own extension, for DeepSeek Harness (dsh): a composer toggle in the zone left of the model picker — hugging the prompt-enhancer button — that makes every reply **lead with results and skip the filler** — while the depth of investigation, verification, and double-checking stays exactly the same. With Concise on, every reply opens with an engineering-blueprint digest card — faint grid, corner measurement ticks, monospace 1.18em — and selecting text inside the card copies it on mouse-up.
+Based on Claude Code's built-in **Concise output style** (unchanged upstream since 2.1.258) plus this plugin's own extension, for DeepSeek Harness (dsh): a composer toggle in the zone left of the model picker — hugging the prompt-enhancer button — that makes every reply **lead with results and skip the filler** — while the depth of investigation, verification, and double-checking stays exactly the same. With Concise on, every final reply opens with an engineering-blueprint digest card (intermediate tool-step narration is exempt) — faint grid, corner measurement ticks, monospace 1.18em — and selecting text inside the card copies it on mouse-up.
 
 [**中文**](README.md) · [Releases](https://github.com/hoyyang/dsh-concise/releases) · [Changelog](CHANGELOG.md)
 
@@ -49,8 +49,9 @@ The toggle is **per-session**: turning it on here doesn't touch your other sessi
 ## Features
 
 - **One-click toggle (collapsed)** immediately left of the prompt-enhancer button (row order: Concise → prompt-enhancer → model picker): only the switch shows by default, pinned against the pill — hover or keyboard focus expands the Concise label leftward with the right edge pinned, never shifting neighboring controls
-- **Plain-language digest card**: with Concise on, EVERY reply opens with an engineering-blueprint card (faint grid + corner ticks + monospace 1.18em, dark text on light, works in both themes) — the rule is issued unconditionally and re-injected on every model assembly — 2-3 plain sentences restating the conclusion with key words bolded; it only restates what the body already says; selecting text inside copies it on mouse-up (header flashes COPIED ✓; this plugin's fork extswers skip it (this plugin's fork extension beyond upstream Concise)
+- **Plain-language digest card**: with Concise on, EVERY final reply opens with an engineering-blueprint card (intermediate step narration exempt) (faint grid + corner ticks + monospace 1.18em, dark text on light, works in both themes) — the rule is issued unconditionally and re-injected on every model assembly — 2-3 plain sentences restating the conclusion with key words bolded; it only restates what the body already says; selecting text inside copies it on mouse-up (header flashes COPIED ✓; this plugin's fork extension beyond upstream Concise)
 - **`/concise` command** in the slash menu and CLI sessions: `/concise`, `/concise on|off`, `/concise status` (parity with Claude Code's `/output-style`)
+- **Headless/CLI sessions**: the style injection and digest card work there too (without a web server only the local HTTP API degrades — use the `/concise` command)
 - **Custom style**: a non-empty `~/.dsh/dsh-concise/style.md` overrides the built-in style text, effective on the next assembly (parity with `/output-style:new`)
 - **Claude's Concise style**: results first, no preamble, no narration, no filler closers
 - **Same work depth**: only reporting is compressed — never the rigor
@@ -101,7 +102,7 @@ Custom style: put your own text in `~/.dsh/dsh-concise/style.md` to fully replac
 | UI placement | client module anchors in the `conversation.input.right` slot and portals the button left of the prompt-enhancer entry (or left of the model seat when absent), kept in place by a `MutationObserver` |
 | Per-session state | `$DSH_HOME/dsh-concise/state.json`: `default` + per-session overrides (500-entry LRU), atomic tmp+rename write |
 | State sync | per-session `dsh-concise:change` DOM event on toggle + 15 s light polling (visible tab) + focus/visibility refetch |
-| Digest rendering | the style text asks for a `> **摘要：**` blockquote on non-trivial replies; the client watches the message DOM (subtree + rAF batching) and upgrades matching blockquotes to an engineering-blueprint card (faint grid via ::before brightening on hover, corner brackets ::after drawing in on mount, monospace 1.18em, selection-copy interaction, concept `assets/style-digest-v07e.png`); original: a warm-paper amber card (gradient border + gradient label + corner glow, theme-independent); removed cleanly on uninstall |
+| Digest rendering | the style text asks for a `> **摘要：**` blockquote on final replies (intermediate steps exempt, plus a tail reminder section); the client watches the message DOM (subtree + rAF batching) and upgrades blockquotes prefixed 摘要： or the legacy 说人话： to an engineering-blueprint card (faint grid via ::before brightening on hover, corner brackets ::after drawing in on mount, monospace 1.18em, selection-copy interaction, concept `assets/style-digest-v07e.png`); original: a warm-paper amber card (gradient border + gradient label + corner glow, theme-independent); removed cleanly on uninstall |
 
 ## Use cases
 

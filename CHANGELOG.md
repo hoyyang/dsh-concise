@@ -3,6 +3,35 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0] - 2026-09-15
+
+### Changed
+
+- Digest mandate rescoped: "every reply, no exceptions" → "every user-facing final
+  reply" (intermediate step narration between tool calls is exempt). Empirical
+  transcript audit (45 sessions, 2026-09-15) showed the unconditional mandate
+  loses to skill-report formats in long agentic runs — 0 digests in both /bugfix
+  runs and in tool-heavy turns, while chat finals complied. Narrowing the scope
+  removes the conflict instead of fighting it.
+- Added a tail reminder prompt section (`dsh-concise:reminder`, order 900, same
+  per-session gating) that re-states the digest-first requirement at the end of
+  the system prompt, countering long-prompt compliance decay.
+
+### Fixed
+
+- Headless/CLI profiles can now assemble the plugin: `webServer` is no longer a
+  hard `inject` dependency (it blocked assembly forever in any profile without a
+  web server — the style sections never reached headless sessions). The HTTP
+  toggle API now attaches reactively via `ctx.inject(['webServer'], …)` and the
+  style/reminder sections work everywhere; only the API degrades when absent.
+- Client digest renderer matches blockquote prefixes 摘要： and 说人话： — digest
+  outputs from sessions run under pre-0.7 style text render as cards again
+  instead of degrading to plain quotes.
+- state.json LRU eviction (500 cap) evicts entries whose value equals the
+  session default first, so entries carrying explicit user intent survive:
+  an explicitly-disabled session no longer silently flips back to the default
+  after eviction.
+
 ## [0.7.0] - 2026-09-15
 
 ### Added

@@ -2,7 +2,7 @@
 
 ![banner](assets/banner.png)
 
-基于 Claude Code 内置 **Concise 输出风格**（自 2.1.258 起上游未再变动）并加入本插件扩展，带进 DeepSeek Harness（dsh）：composer 工具行一键开关（「增强提示词」按钮紧左侧、模型选择按钮左侧区域）——**结果先行，少废话**，而调查、验证、多角度审查的工作深浅完全不变；开启后每轮回答开头必附「摘要」精华摘要卡（工程蓝图卡：极淡网格线 + 四角测量角标 + 等宽字体 1.18em，浅底深字；划选卡内文字松开即复制）。
+基于 Claude Code 内置 **Concise 输出风格**（自 2.1.258 起上游未再变动）并加入本插件扩展，带进 DeepSeek Harness（dsh）：composer 工具行一键开关（「增强提示词」按钮紧左侧、模型选择按钮左侧区域）——**结果先行，少废话**，而调查、验证、多角度审查的工作深浅完全不变；开启后每轮**最终回答**开头必附「摘要」精华摘要卡（工具调用间的中间步骤文本豁免；工程蓝图卡：极淡网格线 + 四角测量角标 + 等宽字体 1.18em，浅底深字；划选卡内文字松开即复制）。
 
 [**English**](README.en.md) · [Releases](https://github.com/hoyyang/dsh-concise/releases) · [更新日志](CHANGELOG.md)
 
@@ -96,8 +96,9 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 ## 功能一览
 
 - **一键开关（收起式）**：composer 工具行「增强提示词」按钮紧左侧的 `● Concise` 开关（行序 Concise → 增强提示词 → 模型选择），单击即切换；平时收起只显示滑轨，悬停或键盘聚焦时 Concise 文字向左平滑展开——Switch 紧贴增强提示词固定不动，右缘固定，不推动相邻按钮
-- **精华摘要卡（说人话）**：开启后**每轮回答**开头必附一张工程蓝图卡（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入（100% 触发口径，本插件对官方 Concise 的分叉扩展）
+- **精华摘要卡（说人话）**：开启后**每轮最终回答**开头必附一张工程蓝图卡（中间步骤文本豁免）（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入，0.8.0 起口径收敛为「每轮最终回复必附」并在 system prompt 尾部增设提醒 section 对冲长流程遵循衰减（本插件对官方 Concise 的分叉扩展）
 - **`/concise` 命令**：slash 菜单与 CLI 会话均可 `/concise`（切换）、`/concise on|off`（显式设置）、`/concise status`（查状态与风格来源）——对齐 Claude Code 的 `/output-style`
+- **headless/CLI 会话**：风格注入与摘要卡同样生效（webServer 缺席时仅本地 HTTP API 降级，开关用 `/concise` 命令）
 - **自定义风格**：把任意文本放进 `~/.dsh/dsh-concise/style.md` 即可整体覆盖内置风格文本（改完保存，下一轮组装即生效）——对齐 Claude Code 的 `/output-style:new`
 - **Claude 同款风格**：完整移植 Claude Code 内置 "Concise" output style 的行为定义（结果先行、跳过开场白与旁白、不重复收尾）
 - **工作深浅不变**：只约束表达方式——调查、验证、多角度审查照旧，绝不因简洁而牺牲严谨
@@ -140,7 +141,7 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 | 会话级状态 | `$DSH_HOME/dsh-concise/state.json`：`default` + 每会话覆盖（500 条 LRU 淘汰），tmp + rename 原子写 |
 | UI 落位 | client 模块注册 `conversation.input.right` 槽作锚点，把按钮 portal 到「增强提示词」条目紧左侧（未装时模型 seat 紧左侧），`MutationObserver` 维持相对位置；React 重渲染/条目重建后自动对位 |
 | 状态同步 | toggle 后按会话广播 `dsh-concise:change` 自定义事件；15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，覆盖命令行/API/其它会话入口的状态变更 |
-| 精华摘要渲染 | 风格文本要求每轮回答以 `> **摘要：**` 引用块开头（无条件下发）；client 监听消息 DOM（subtree + rAF 合批），将以「摘要：」开头的 blockquote 升级为工程蓝图卡（极淡网格 ::before 悬停增亮 + 四角角标 ::after 入场画出 + 等宽 1.18em + 划选复制交互（mouseup 读取卡内选区），概念图 assets/style-digest-v07e.png）；卸载即净 |
+| 精华摘要渲染 | 风格文本要求每轮最终回答以 `> **摘要：**` 引用块开头（无条件下发 + 尾部提醒 section 双保险）；client 监听消息 DOM（subtree + rAF 合批），将以「摘要：」或旧标签「说人话：」开头的 blockquote 升级为工程蓝图卡（极淡网格 ::before 悬停增亮 + 四角角标 ::after 入场画出 + 等宽 1.18em + 划选复制交互（mouseup 读取卡内选区），概念图 assets/style-digest-v07e.png）；卸载即净 |
 
 ### 设计细节
 
