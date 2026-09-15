@@ -1,0 +1,11 @@
+# dsh-concise bundle 装配清单。
+# 列入 profile bundles 时由官方 boot 层按此清单装配；勿删除本文件，
+# package.json 的 dsh.bundle.patch 指向它，缺了冷启动直接报错。
+# config 全部可选（defaultEnabled 默认 false）；在 profile 的 cordis.patch.yml 里用
+#   - id: dsh-concise
+#     config: { defaultEnabled: true }
+# 覆盖。
+- insert:
+    - id: dsh-concise
+      name: 'dsh-concise'
+      config: {}
