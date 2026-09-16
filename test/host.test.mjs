@@ -62,8 +62,13 @@ test('registers style + reminder sections with per-session gating', async () => 
   assert.match(style, /user-facing final reply/)
   assert.doesNotMatch(style, /every reply, no exceptions/)
   assert.match(style, /\*\*摘要：\*\*/)
+  // 0.8.1：长解释型回复是已实证的失效模式（L4 会话 seq388/464），style 与 reminder 都必须点名
+  assert.match(style, /Length and structure are NOT exemptions/)
+  assert.match(style, /long explanation replies/)
   assert.match(reminder, /REMINDER \(Concise output style\)/)
   assert.match(reminder, /摘要 digest blockquote/)
+  assert.match(reminder, /before any heading, table, or body text/)
+  assert.match(reminder, /long explanation replies/)
 })
 
 test('LRU evicts redundant-default entries first, preserves explicit user intent', async () => {

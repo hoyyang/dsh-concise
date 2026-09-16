@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.1] - 2026-09-16
+
+### Fixed
+- 摘要卡在长解释型最终回复中缺失（实证：L4 会话 seq388/464，注入链路与开关均正常，模型对长文档式回复不遵循 digest 契约）。
+- style 正文新增「Length and structure are NOT exemptions」点名长解释/表格型回复不得豁免；reminder 尾部提醒升级为「首渲染元素必须是摘要块 + 长回复最易漏」双重措辞。
+
+### Changed
+- 合规回归新增长解释型样本（复刻失效模式），不再只测短任务样本（0.8.0 的 86% 合规率盲区，STATE 风险③兑现）。
+
 ## [0.8.0] - 2026-09-15
 
 ### Changed
