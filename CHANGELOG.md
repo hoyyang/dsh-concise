@@ -3,6 +3,25 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.7] - 2026-09-17
+
+### Fixed
+- 用户实测两问题：①图片 chip 点击打开的是所在文件夹而非文件本身；②md 文件 chip 点击只复制路径。
+  根因：宿主 open-in-app open 路由的 wire 校验只接受**已存在目录**（读宿主源码确认 isDirectory 硬校验，
+  文件路径一律 404）→ 0.8.6 的目录回退只解决了「有反应」没解决「打开文件」；且**相对路径**（摘要里的
+  var/scripts/….md）未经绝对化直接 POST → 400 → 降级复制。
+- 修复：
+  ① 文本/图片类（代码/Markdown/图片/文件）点击改为 **IDE 协议真打开文件本身**：cursor/vscode/windsurf/zed
+     协议按探测优先（window.open(ide://file<abs>)），宿主目录回退保留为无 IDE 时的兜底；
+  ② 相对路径绝对化：host 在 assemble waterfall 缓存 session.header.cwd + 新增 GET /dsh-concise/api/cwd
+     （sid 缓存 → 最近 cwd → process.cwd 兜底）；client 点击时 GET cwd → resolveAbsolute（~/按 home、
+     相对按 cwd）；cwd 不可得时按原样尝试失败降级复制。
+- 划选复制依旧不受影响。
+
+### Verified
+- 真机 spy 实测：绝对路径 → cursor://file/Users/demo/Desktop/测试.png ✓；相对路径解析链路通（注入卡
+  无组装历史走 process.cwd 兜底；真实时序发消息后即有正确 cwd）。host 5/5 + chips 7/7。
+
 ## [0.8.6] - 2026-09-17
 
 ### Fixed

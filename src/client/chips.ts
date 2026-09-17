@@ -156,6 +156,13 @@ function insideChip(node: Node | null): boolean {
   return false
 }
 
+
+/** 短时状态标：加类并定时移除。 */
+function mark(el: HTMLElement, cls: string): void {
+  el.classList.add(cls)
+  window.setTimeout(() => el.classList.remove(cls), 1500)
+}
+
 /** 构造单个 chip 元素（路径用 textContent 注入，防 HTML 注入；本地文件点击复制路径）。 */
 function buildChip(value: string, isUrl: boolean): Element {
   const info = detectPathKind(value)
@@ -178,22 +185,31 @@ function buildChip(value: string, isUrl: boolean): Element {
     el.title = info.label + ' · 点击用系统应用打开'
     el.addEventListener('click', (ev) => {
       ev.stopPropagation()
-      void openViaHost(path).then((opened) => {
-        if (opened) {
-          el.classList.add('dcc-opened')
-          el.dataset.opened = opened
-          window.setTimeout(() => el.classList.remove('dcc-opened'), 1800)
-        } else {
-          void navigator.clipboard?.writeText(path).then(() => {
-            el.classList.add('dcc-copied')
-            window.setTimeout(() => el.classList.remove('dcc-copied'), 1300)
-          }).catch(() => {})
+      void (async () => {
+        // cwd 由 host 在 assemble 时缓存（GET /dsh-concise/api/cwd），用于相对路径 → 绝对路径
+        let cwd = ''; let home = ''
+        try {
+          const res = await fetch('/dsh-concise/api/cwd')
+          if (res.ok) {
+            const j = (await res.json()) as { cwd?: string }
+            if (typeof j.cwd === 'string') { cwd = j.cwd; home = cwd.split('/').slice(0, 3).join('/') }
+          }
+        } catch { /* cwd 不可得时按原样尝试 */ }
+        const abs = resolveAbsolute(path, cwd, home)
+        const apps = await probeApps()
+        const info = detectPathKind(path)
+        const ideFit = info.kind === 'code' || info.kind === 'markdown' || info.kind === 'image' || info.kind === 'file'
+        const scheme = ideFit ? ideSchemeUrl(apps, abs) : null
+        if (scheme) {
+          window.open(scheme, '_blank')
+          mark(el as HTMLElement, 'dcc-opened')
+          return
         }
-      }).catch(() => {
-        void navigator.clipboard?.writeText(path).catch(() => {})
-        el.classList.add('dcc-copied')
-        window.setTimeout(() => el.classList.remove('dcc-copied'), 1300)
-      })
+        const opened = await openViaHost(abs)
+        if (opened) { mark(el as HTMLElement, 'dcc-opened'); return }
+        try { await navigator.clipboard?.writeText(path) } catch { /* 降级 */ }
+        mark(el as HTMLElement, 'dcc-copied')
+      })()
     })
   }
   const iconHost = document.createElement('span')
@@ -230,4 +246,39 @@ export function applyChipEnhancement(root: Element): void {
     }
     textNode.parentNode?.replaceChild(frag, textNode)
   }
+}
+
+
+/** 探测宿主可用系统应用列表（复用 openViaHost 缓存）。 */
+export async function probeApps(): Promise<string[]> {
+  if (cachedApps) return cachedApps
+  try {
+    const loc = globalThis.location
+    const base = loc && loc.origin && loc.origin !== 'null' ? loc.origin : 'http://dsh.internal'
+    const res = await fetch(new URL('/open-in-app/apps', base))
+    if (!res.ok) return []
+    const wrapped = (await res.json()) as { apps?: unknown }
+    const arr = Array.isArray(wrapped?.apps) ? wrapped.apps : []
+    cachedApps = arr.map((x) => (typeof x === 'string' ? x : (x as { id?: string })?.id)).filter((x): x is string => typeof x === 'string' && x.length > 0)
+    return cachedApps
+  } catch {
+    return []
+  }
+}
+
+/** 相对路径 → 绝对路径：~ 开头按 home（= cwd 前 3 段）代；相对按 cwd 拼接；绝对原样。 */
+export function resolveAbsolute(path: string, cwd: string, home: string): string {
+  if (path.startsWith('/')) return path
+  if (path.startsWith('~/')) {
+    const base = home || (cwd ? cwd.split('/').slice(0, 3).join('/') : '')
+    return base ? base + path.slice(1) : path
+  }
+  return cwd ? cwd.replace(/\/?$/, '/') + path : path
+}
+
+/** IDE 协议 URL：按探测优先级返回第一个可用协议，无则 null。 */
+export function ideSchemeUrl(apps: string[], absPath: string): string | null {
+    const order = ['cursor', 'vscode', 'windsurf', 'zed']
+    const ide = order.find((id) => apps.includes(id))
+    return ide ? ide + '://file' + absPath : null
 }

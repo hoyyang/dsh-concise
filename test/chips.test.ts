@@ -53,3 +53,19 @@ test('splitPathSegments returns single text for plain prose (no false positives)
   assert.equal(segs.length, 1)
   assert.equal(segs[0].type, 'text')
 })
+
+test('resolveAbsolute resolves relative and tilde paths against cwd/home', async () => {
+  const { resolveAbsolute } = await import('../src/client/chips.ts')
+  const cwd = '/Users/demo/Desktop/AI/hyperaitools'
+  const home = '/Users/demo'
+  assert.equal(resolveAbsolute('/abs/x.md', cwd, home), '/abs/x.md')
+  assert.equal(resolveAbsolute('var/scripts/L3.md', cwd, home), cwd + '/var/scripts/L3.md')
+  assert.equal(resolveAbsolute('~/notes/a.md', cwd, home), '/Users/demo/notes/a.md')
+})
+
+test('ideSchemeUrl picks first detected IDE and encodes file path', async () => {
+  const { ideSchemeUrl } = await import('../src/client/chips.ts')
+  assert.equal(ideSchemeUrl(['finder', 'cursor', 'vscode'], '/Users/demo/x.md'), 'cursor://file/Users/demo/x.md')
+  assert.equal(ideSchemeUrl(['finder'], '/Users/demo/x.md'), null)
+})
+
