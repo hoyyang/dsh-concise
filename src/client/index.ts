@@ -20,6 +20,7 @@
  */
 import React from 'react'
 import { normalizeDigestHref, normalizeDigestText } from './normalize'
+import { applyChipEnhancement } from './chips'
 import { createRoot } from 'react-dom/client'
 
 type SlotsService = {
@@ -115,6 +116,18 @@ const css = [
   '.dsh-concise-digest p>strong:first-child::before{content:"DIGEST // ";color:#E8926B!important;letter-spacing:.06em!important}',
   '.dsh-concise-digest[data-copied="1"] p>strong:first-child::before{content:"COPIED ✓ ";color:#2E9E5B!important}',
   '.dsh-concise-digest p strong:not(:first-child){font-weight:700!important;color:#17100D!important}',
+  '.dsh-concise-digest .dsh-concise-chip{display:inline-flex;align-items:center;gap:.3em;padding:.05em .5em;margin:0 .1em;vertical-align:baseline;border-radius:6px;border:1px solid color-mix(in srgb,var(--dcc-c) 42%,transparent);background:color-mix(in srgb,var(--dcc-c) 10%,transparent);color:var(--dcc-c);font-size:.92em;line-height:1.55;text-decoration:none!important;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease;animation:dcc-in .18s ease backwards}',
+  '.dsh-concise-digest .dsh-concise-chip:hover{transform:translateY(-1px);border-color:var(--dcc-c);box-shadow:0 2px 12px color-mix(in srgb,var(--dcc-c) 32%,transparent);background:color-mix(in srgb,var(--dcc-c) 16%,transparent)}',
+  '.dsh-concise-digest .dsh-concise-chip:active{transform:translateY(0) scale(.98)}',
+  '.dsh-concise-digest .dsh-concise-chip .dcc-i{display:inline-flex;width:1.05em;height:1.05em;flex:none}',
+  '.dsh-concise-digest .dsh-concise-chip .dcc-i svg{width:100%;height:100%}',
+  '.dsh-concise-digest .dsh-concise-chip .dcc-a{display:inline-flex;width:.85em;height:.85em;flex:none;opacity:.55}',
+  '.dsh-concise-digest .dsh-concise-chip .dcc-a svg{width:100%;height:100%}',
+  '.dsh-concise-digest .dsh-concise-chip .dcc-p{color:inherit;max-width:36em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}',
+  '.dsh-concise-digest .dsh-concise-chip.dcc-copied .dcc-a{color:#2E9E5B;opacity:1}',
+  '.dsh-concise-digest .dsh-concise-chip.dcc-copied::after{content:"已复制 ✓";color:#2E9E5B;font-size:.85em;font-weight:700;margin-left:.2em}',
+  '@keyframes dcc-in{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}',
+  '@media (prefers-reduced-motion:reduce){.dsh-concise-digest .dsh-concise-chip{animation:none;transition:none}}',
   '@media (prefers-reduced-motion:reduce){.dsh-concise-digest,.dsh-concise-digest::after{animation:none!important}.dsh-concise-digest::after{opacity:.9}}',
 ].join('\n')
 
@@ -444,6 +457,8 @@ export function apply(ctx: ClientContext): void {
             if (fixedText !== text) a.textContent = fixedText
           }
         }
+          // v0.8.5：卡内路径 chip 化（网页跳转 / 本地文件点击复制，类型图标 + 协调动效）
+          applyChipEnhancement(bq)
       }
     }
     const schedule = (): void => {

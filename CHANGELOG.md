@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.5] - 2026-09-17
+
+### Added
+- 摘要卡内路径 chip 系统：卡内的网页链接与本地文件路径自动转为类型化可交互 chip——网页链接直接
+  跳转（target=_blank + noopener），本地文件点击复制路径（web 安全模型内最可靠的「直接可用」交互，
+  宿主无 file:// 打开机制已实测）；按扩展名分 10 类图标与类型色（图片/PDF/Word/表格/代码/Markdown/
+  压缩包/文件夹/网页/文件），hover 上浮 + 类型色辉光、入场淡入、复制后「已复制 ✓」徽标，
+  prefers-reduced-motion 全适配。**摘要卡片本体样式零改动**（chip 全部限定卡内作用域）。
+- 设计参考：ui-screenshot-system 模板生成 chip 组件系统设计稿（assets 未入库，设计定稿为代码实现）。
+
+### Security
+- 路径文本一律 textContent 注入（防 HTML 注入）；图标为静态内联 SVG 常量。
+
+### Tests
+- chips.test.ts 5/5：10 类扩展名映射、混合摘要文本切分边界（中文句读不吞入、尾标点剥离、
+  无路径纯文本无误报）、类型色与标签携带。
+
 ## [0.8.4] - 2026-09-17
 
 ### Fixed
