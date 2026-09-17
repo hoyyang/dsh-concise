@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.4] - 2026-09-17
+
+### Fixed
+- 首轮长评估型最终回复缺失摘要卡（实证：AutoFillUI 气泡转发评估会话第一轮「## 结论」开头 9k 字方案
+  无摘要；第二轮也缺——0.8.3 miss 闭环无历史可依且事件链路死亡）。
+- **0.8.3 事件闭环实测废弃**：assistant/message + user/message 探针零到达（session.append 落盘事件不
+  派发到插件 ctx）——Phase 2 教训：事件可达性必须实测，不能以类型声明推断。
+- **v0.8.4 真实现**：system-prompt/assemble waterfall（可达性有 dsh-smart-compact 生产先例）监听中用
+  session.deriveMessages() 同步判定最后一条 assistant 消息是否以摘要块开头；缺失或首轮无历史 → 向
+  assembly 追加 COMPLIANCE WARNING（逐会话判定、覆盖首轮、无事件依赖）。回调失败不阻断组装。
+- style 点名：heading opener（## 结论 / ## 方案）不是摘要。
+
+### Tests
+- waterfall 契约 2 用例（缺摘要→assembly 追加警告；合规与全新会话首轮→分别无/有警告），
+  host 5/5；staging 真机首轮评估场景带卡 PASS。
+
 ## [0.8.3] - 2026-09-17
 
 ### Fixed

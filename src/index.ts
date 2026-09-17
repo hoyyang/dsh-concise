@@ -11,7 +11,7 @@
  * 风格定义对齐 Claude Code 内置 "Concise" output style：
  * 「Claude leads with results and skips preamble and narration, while doing the work just as thoroughly.」
  */
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
@@ -35,7 +35,7 @@ export type ConfigType = { defaultEnabled?: boolean }
 /** Concise 输出风格正文：注入 system prompt 的实际内容（无 style.md 覆盖时使用）。 */
 export const CONCISE_STYLE_TEXT = [
   'Concise output style (active): lead with the result. Put the answer, the decision, or the finished artifact in the first sentence or two; explanation follows only as needed.',
-  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).\nLength and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.\nURLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.\nTask-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.',
+  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).\nLength and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.\nURLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.\nTask-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.\nA heading opener like ## 结论 / ## 方案 is also NOT the digest — the digest block precedes any heading, however the reply is structured.',
   '- Never open by restating the question or with pleasantries ("Sure", "Great question", "好的", "当然可以") — the first line is already the answer or the key finding.',
   '- Skip filler closers: no recap of what you just did, no "In summary" restating the response, no boilerplate apologies or hedges, no closing offers ("需要我…吗？") unless a decision is genuinely required.',
   '- For enumerable facts prefer a table or a tight list over paragraphs — structure is not verbosity; compact and structured beats long and prosy.',
@@ -181,6 +181,26 @@ interface CommandsLike {
     handler: (invocation: CommandInvocation) => { kind: 'success' | 'error'; text: string }
   }) => () => void
 }
+/** Assembled prompt (minimal duck type; system/developer are the model-facing strings). */
+interface AssembledLike {
+  system?: string
+  developer?: string
+  [key: string]: unknown
+}
+
+/** Minimal duck type of the live session object reachable from assemble context. */
+interface SessionLike {
+  id: unknown
+  deriveMessages?: () => unknown
+}
+
+/** Append the compliance warning to the assembled prompt (smart-compact compatible shape). */
+function appendWarning(assembled: AssembledLike, text: string): AssembledLike {
+  if (typeof assembled?.system === 'string') return { ...assembled, system: assembled.system + '\n\n' + text }
+  if (typeof assembled?.developer === 'string') return { ...assembled, developer: assembled.developer + '\n\n' + text }
+  return assembled
+}
+
 interface HostContext {
   systemPrompt?: SystemPromptLike
   commands?: CommandsLike
@@ -222,10 +242,6 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
   const state = loadState(config.defaultEnabled ?? false)
   const log = ctx.logger ?? {}
 
-  // v0.8.3 miss 闭环状态（全局单标记，见下方事件监听注释）
-  let lastAssistantMissing = false
-  let lastAssistantSeen = false
-  let missGlobal = false
 
   const isEnabled = (sessionId: string | null): boolean =>
     sessionId === null ? state.default : (state.sessions[sessionId]?.enabled ?? state.default)
@@ -260,46 +276,60 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
         const sid = sessionIdOf(context)
         if (!isEnabled(sid)) return ''
         // v0.8.3 miss 闭环：上一条最终回复缺摘要 → 追加合规警告（全局单标记，见事件监听注释）
-        return missGlobal ? REMINDER_TEXT + ' \n\n' + MISS_WARNING : REMINDER_TEXT
+        return isEnabled(sid) ? REMINDER_TEXT : ''
       },
     }), 'dsh-concise: reminder section')
   } else {
     log.warn?.('[dsh-concise] systemPrompt service missing — style injection disabled')
   }
 
-  // 0.6) miss 检测闭环（v0.8.3）：监听会话消息事件，跟踪「最后一条带文本的 assistant 消息」是否以摘要块开头；
-  // user 消息到达 = 上个 turn 结束，此时固化为全局 miss 标记，reminder 据此注入 WARNING（下轮反馈）。
-  // 已知边界：'assistant/message' 载荷不含 sessionId → 全局单标记；并行会话下可能跨会话注入 WARNING，
-  // 该警告本身无害（任何开启 Concise 的会话都应写摘要）。事件不可见的环境静默降级为纯措辞路径。
+  // 0.6) 合规反馈闭环（v0.8.4 真实现）：system-prompt/assemble waterfall 每轮组装时同步读当前会话派生
+  // 历史（session.deriveMessages()），检查最后一条 assistant 消息是否以摘要块开头；缺失（或首轮尚无
+  // assistant 历史）则向 assembly 追加 COMPLIANCE WARNING。逐会话判定、覆盖首轮、无事件可达性依赖
+  // （0.8.3 的 assistant/message 事件经实测不派发到插件，已废弃）。回调失败仅吞掉本次警告，不阻断组装。
   if (typeof ctx.on === 'function') {
     ctx.effect(() => {
       const offs: Array<(() => void) | void> = []
       try {
-        offs.push(ctx.on!('assistant/message', (event) => {
+        offs.push(ctx.on!('system-prompt/assemble', async (...args: unknown[]) => {
+          const next = args[args.length - 1] as () => Promise<AssembledLike>
+          const assembled = await next()
           try {
-            const content = (event as { message?: { content?: Array<{ type?: string; text?: string }> } }).message?.content ?? []
-            const text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
-            if (text.trim().length === 0) return
-            lastAssistantSeen = true
-            lastAssistantMissing = !text.trimStart().startsWith('> **摘要：**')
-          } catch { /* 观测失败不阻断消息流 */ }
+            const context = (args.length >= 2 ? args[args.length - 2] : undefined) as { agent?: { session?: SessionLike } } | undefined
+            const session = context?.agent?.session
+            if (!session || typeof session.deriveMessages !== 'function') return assembled
+            const rawId = session.id
+            const sid = typeof rawId === 'function' ? String(rawId()) : String(rawId)
+            if (!isEnabled(sid)) return assembled
+            const msgs = (session.deriveMessages() ?? []) as Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>
+            let lastAssistant = ''
+            for (let i2 = msgs.length - 1; i2 >= 0; i2--) {
+              if (msgs[i2]?.role === 'assistant') {
+                lastAssistant = (msgs[i2].content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
+                break
+              }
+            }
+            const trimmed = lastAssistant.trimStart()
+            const missing = trimmed.length === 0 ? true : !trimmed.startsWith('> **摘要：**')
+            if (!missing) return assembled
+            const warn = MISS_WARNING + '\n\n' + '(Compliance check: the previous final reply in this session opened without the 摘要 digest blockquote — this session is on notice.)'
+            return appendWarning(assembled, warn)
+          } catch { return assembled }
         }))
-        offs.push(ctx.on!('user/message', () => {
-          try {
-            if (lastAssistantSeen) missGlobal = lastAssistantMissing
-            lastAssistantMissing = false
-            lastAssistantSeen = false
-          } catch { /* 同上 */ }
-        }))
-        log.info?.('[dsh-concise] digest miss-detection attached (assistant/message + user/message)')
+        log.info?.('[dsh-concise] digest compliance waterfall attached (system-prompt/assemble)')
       } catch (error) {
-        log.warn?.('[dsh-concise] miss-detection attach failed — degraded to wording-only: ' + String(error))
+        log.warn?.('[dsh-concise] compliance waterfall attach failed: ' + String(error))
       }
       return () => {
         for (const off of offs) { try { (typeof off === 'function') && off() } catch { /* 卸载幂等 */ } }
       }
-    }, 'dsh-concise: digest miss detection')
+    }, 'dsh-concise: digest compliance waterfall')
   }
+
+  // 0.6) miss 检测闭环（v0.8.3）：监听会话消息事件，跟踪「最后一条带文本的 assistant 消息」是否以摘要块开头；
+  // user 消息到达 = 上个 turn 结束，此时固化为全局 miss 标记，reminder 据此注入 WARNING（下轮反馈）。
+  // 已知边界：'assistant/message' 载荷不含 sessionId → 全局单标记；并行会话下可能跨会话注入 WARNING，
+  // 该警告本身无害（任何开启 Concise 的会话都应写摘要）。事件不可见的环境静默降级为纯措辞路径。
 
   // 2) host 命令 /concise：作用于当前会话
   if (ctx.commands) {

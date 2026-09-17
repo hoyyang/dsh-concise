@@ -112,37 +112,35 @@ test('legacy 说人话 digest prefix is accepted by client matcher regex', async
   assert.ok(!MARK_RE.test('摘要'))
 })
 
-test('miss-detection: previous final reply without digest injects compliance warning', async () => {
+test('compliance waterfall: previous final reply without digest appends warning to assembly', async () => {
   makeEnv()
-  const { ctx, sections, listeners, api } = mockCtx()
+  const { ctx, listeners, api } = mockCtx()
   const { apply } = await import('../lib/index.js')
   apply(ctx)
   await callApi(api(), 'POST', '/toggle', {})
-  const assistant = listeners['assistant/message']
-  const user = listeners['user/message']
-  assert.ok(typeof assistant === 'function', 'assistant/message listener attached')
-  assert.ok(typeof user === 'function', 'user/message listener attached')
-  const sid = { agent: { session: { id: 's-miss' } } }
-  assistant({ message: { content: [{ type: 'text', text: '全部完成：三件事都已交付。' }] } })
-  user({})
-  const reminder = sections[1].text(sid)
-  assert.match(reminder, /COMPLIANCE WARNING/)
-  assert.match(reminder, /SELF-CHECK/)
-  assistant({ message: { content: [{ type: 'text', text: '> **摘要：** 已完成。' }] } })
-  user({})
-  assert.doesNotMatch(sections[1].text(sid), /COMPLIANCE WARNING/)
+  const waterfall = listeners['system-prompt/assemble']
+  assert.ok(typeof waterfall === 'function', 'assemble waterfall attached')
+  const session = { id: 'session-w1', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '全部完成：交付物如下。' }] }] }
+  const assembled = await waterfall({ agent: { session } }, () => Promise.resolve({ system: 'base prompt' }))
+  assert.match(assembled.system, /COMPLIANCE WARNING/)
+  assert.match(assembled.system, /base prompt/)
 })
 
-test('miss-detection: empty-text assistant messages are ignored', async () => {
+test('compliance waterfall: clean last reply and fresh session produce no warning', async () => {
   makeEnv()
-  const { ctx, sections, listeners, api } = mockCtx()
+  const { ctx, listeners, api } = mockCtx()
   const { apply } = await import('../lib/index.js')
   apply(ctx)
   await callApi(api(), 'POST', '/toggle', {})
-  const assistant = listeners['assistant/message']
-  const user = listeners['user/message']
-  const sid = { agent: { session: { id: 's-clean' } } }
-  assistant({ message: { content: [{ type: 'reasoning', text: 'thinking' }] } })
-  user({})
-  assert.doesNotMatch(sections[1].text(sid), /COMPLIANCE WARNING/)
+  const waterfall = listeners['system-prompt/assemble']
+  // 带摘要的最后一条 assistant → 无警告
+  const ok = { id: 'session-w2', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '> **摘要：** 结论。' }] }] }
+  const a1 = await waterfall({ agent: { session: ok } }, () => Promise.resolve({ system: 'base' }))
+  assert.doesNotMatch(a1.system, /COMPLIANCE WARNING/)
+  // 全新会话（无任何消息）→ 首轮保护：带警告
+  const fresh = { id: 'session-w3', deriveMessages: () => [] }
+  const a2 = await waterfall({ agent: { session: fresh } }, () => Promise.resolve({ system: 'base' }))
+  assert.match(a2.system, /COMPLIANCE WARNING/)
 })
+
+
