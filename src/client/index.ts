@@ -19,6 +19,7 @@
  * 跨重启持久。按钮通过槽位 inject 拿到当前会话 id，所有状态读写都带 sessionId。
  */
 import React from 'react'
+import { normalizeDigestHref, normalizeDigestText } from './normalize'
 import { createRoot } from 'react-dom/client'
 
 type SlotsService = {
@@ -431,6 +432,18 @@ export function apply(ctx: ClientContext): void {
         const hit = MARK_RE.test((bq.textContent ?? '').trimStart())
         bq.classList.toggle('dsh-concise-digest', hit)
         if (hit && !bq.title) bq.title = '划选卡内文字，松开即复制'
+        // v0.8.2：宿主 linkify 会把紧贴 URL 的粗体标记与中文句读吞进 href（实测 …/xxx**%E3%80%82），
+        // 摘要卡内做确定性兜底修复；标准 [label](url) 链接不受影响，此步对它们是 no-op。
+        if (hit) {
+          for (const a of Array.from(bq.querySelectorAll('a[href]'))) {
+            const href = a.getAttribute('href') ?? ''
+            const fixedHref = normalizeDigestHref(href)
+            if (fixedHref !== href) a.setAttribute('href', fixedHref)
+            const text = a.textContent ?? ''
+            const fixedText = normalizeDigestText(text)
+            if (fixedText !== text) a.textContent = fixedText
+          }
+        }
       }
     }
     const schedule = (): void => {

@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.2] - 2026-09-17
+
+### Fixed
+- 摘要卡内链接被宿主渲染管线污染：blockquote 内容走「纯文本 + 自定义 linkify」路径，其 URL 字符类
+  含 * 与 pct 编码段，把紧贴 URL 的粗体标记与中文句读一并吞进 href（实测形态
+  https://feishu.cn/wiki/xxx**%E3%80%82，飞书 404）；同一 URL 在正文以 [label](url) 写法则正常。
+  修复 = client 摘要卡渲染增强内新增确定性兜底：normalizeDigestHref/normalizeDigestText 剥离 href
+  与链接文字尾部的星号/中文句读（循环至稳定；剥空或无 scheme 回退原值）。标准链接为 no-op。
+- style 措辞新增：URLs, file paths, and code spans stay bare (or [label](url)) — bold corrupts links。
+
+### Changed
+- 单测新增长 digest 链接规范化契约（test/normalize.test.ts，node --test --experimental-strip-types 直跑 TS，零新增依赖）。
+
 ## [0.8.1] - 2026-09-16
 
 ### Fixed
