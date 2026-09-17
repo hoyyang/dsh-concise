@@ -72,6 +72,8 @@ interface HostContext {
         error?: (...args: unknown[]) => void;
     };
     effect: (fn: () => unknown | (() => void), label?: string) => void;
+    /** cordis 事件订阅（可选）： miss 检测闭环用；环境无此能力时静默降级为纯措辞。 */
+    on?: (event: string, listener: (payload: unknown) => void) => (() => void) | void;
     /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
     inject: (deps: string[], callback: (scoped: {
         webServer: WebServerLike;

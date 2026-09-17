@@ -3,6 +3,38 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.3] - 2026-09-17
+
+### Fixed
+- 深会话「任务完成汇报型」最终回复系统性缺失摘要卡（实证：autofill-ai-parser-L3/L4 会话 09-17
+  16:09-17:53 五条交付汇报型最终回复 0/5 带卡，短任务回复 8/8 正常；v0.8.1/0.8.2 措辞均未覆盖）。
+  措辞点名追不上模型自分类，本轮引入机制性修复：
+  ① miss 检测反馈闭环：host 监听 assistant/message + user/message 会话事件，跟踪「最后一条带文本的
+     assistant 消息」是否以摘要块开头，user 消息到达（= 上个 turn 结束）时固化标记；reminder section
+     据此在下一轮注入 COMPLIANCE WARNING。已知边界：事件载荷无 sessionId → 全局单标记（并行会话
+     可能跨会话注入无害警告）；事件不可见环境静默降级为纯措辞。
+  ② reminder 改为发送前自检清单式（SELF-CHECK + 豁免不带进最终回复）。
+  ③ style 点名 task-completion reports（全部完成/已实施/方案已落盘/交付物清单）不是摘要的替代品。
+
+### Changed
+- host.test.mjs 新增 miss 闭环 2 用例（缺摘要→WARNING 注入→带摘要清除）；mockCtx 增加 on 事件捕获。
+
+## [0.8.3] - 2026-09-17
+
+### Fixed
+- 深会话「任务完成汇报型」最终回复系统性缺失摘要卡（实证：autofill-ai-parser-L3/L4 会话 09-17
+  16:09-17:53 五条交付汇报型最终回复 0/5 带卡，短任务回复 8/8 正常；v0.8.1/0.8.2 措辞均未覆盖）。
+  措辞点名追不上模型自分类，本轮引入机制性修复：
+  ① miss 检测反馈闭环：host 监听 assistant/message + user/message 会话事件，跟踪「最后一条带文本的
+     assistant 消息」是否以摘要块开头，user 消息到达（= 上个 turn 结束）时固化标记；reminder section
+     据此在下一轮注入 COMPLIANCE WARNING。已知边界：事件载荷无 sessionId → 全局单标记（并行会话
+     可能跨会话注入无害警告）；事件不可见环境静默降级为纯措辞。
+  ② reminder 改为发送前自检清单式（SELF-CHECK + 豁免不带进最终回复）。
+  ③ style 点名 task-completion reports（全部完成/已实施/方案已落盘/交付物清单）不是摘要的替代品。
+
+### Changed
+- host.test.mjs 新增 miss 闭环 2 用例（缺摘要→WARNING 注入→带摘要清除）；mockCtx 增加 on 事件捕获。
+
 ## [0.8.2] - 2026-09-17
 
 ### Fixed

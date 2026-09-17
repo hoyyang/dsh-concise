@@ -35,7 +35,7 @@ export type ConfigType = { defaultEnabled?: boolean }
 /** Concise 输出风格正文：注入 system prompt 的实际内容（无 style.md 覆盖时使用）。 */
 export const CONCISE_STYLE_TEXT = [
   'Concise output style (active): lead with the result. Put the answer, the decision, or the finished artifact in the first sentence or two; explanation follows only as needed.',
-  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).\nLength and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.\nURLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.',
+  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).\nLength and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.\nURLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.\nTask-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.',
   '- Never open by restating the question or with pleasantries ("Sure", "Great question", "好的", "当然可以") — the first line is already the answer or the key finding.',
   '- Skip filler closers: no recap of what you just did, no "In summary" restating the response, no boilerplate apologies or hedges, no closing offers ("需要我…吗？") unless a decision is genuinely required.',
   '- For enumerable facts prefer a table or a tight list over paragraphs — structure is not verbosity; compact and structured beats long and prosy.',
@@ -52,7 +52,9 @@ const SECTION_ORDER = 40
 /** 尾部提醒 section：system prompt 末尾再敲一次「最终回复必附摘要」，对冲长 prompt 下的遵循衰减。 */
 const REMINDER_SECTION_NAME = 'dsh-concise:reminder'
 const REMINDER_SECTION_ORDER = 900
-const REMINDER_TEXT = 'REMINDER (Concise output style): if this turn ends with a user-facing final reply, its FIRST rendered element must be the 摘要 digest blockquote exactly as defined in the Concise output style section above ("> **摘要：** …") — before any heading, table, or body text, however long or structured the reply is; long explanation replies are where the digest is most often skipped. Intermediate step narration between tool calls is exempt.'
+const REMINDER_TEXT = 'REMINDER (Concise output style): before ending this turn, SELF-CHECK the final user-facing text block — its first characters must be the 摘要 digest blockquote exactly as defined in the Concise output style section above. Intermediate step narration between tool calls stays exempt, but the exemption NEVER carries to the final reply: after the last tool call, restart the digest discipline. Task-completion reports and long explanations are the most common violations.'
+/** 上一条最终回复缺摘要时追加的反馈句（miss 检测闭环，v0.8.3）。 */
+const MISS_WARNING = 'COMPLIANCE WARNING: your previous final reply violated the digest contract (no 摘要 card). THIS reply MUST begin with the digest block — no exceptions.'
 
 /** 会话条目上限：超出时按最近使用淘汰，防 state.json 无界增长。 */
 const MAX_SESSION_ENTRIES = 500
@@ -184,6 +186,8 @@ interface HostContext {
   commands?: CommandsLike
   logger?: { info?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
   effect: (fn: () => unknown | (() => void), label?: string) => void
+  /** cordis 事件订阅（可选）： miss 检测闭环用；环境无此能力时静默降级为纯措辞。 */
+  on?: (event: string, listener: (payload: unknown) => void) => (() => void) | void
   /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
   inject: (deps: string[], callback: (scoped: { webServer: WebServerLike }) => unknown) => unknown
 }
@@ -218,6 +222,11 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
   const state = loadState(config.defaultEnabled ?? false)
   const log = ctx.logger ?? {}
 
+  // v0.8.3 miss 闭环状态（全局单标记，见下方事件监听注释）
+  let lastAssistantMissing = false
+  let lastAssistantSeen = false
+  let missGlobal = false
+
   const isEnabled = (sessionId: string | null): boolean =>
     sessionId === null ? state.default : (state.sessions[sessionId]?.enabled ?? state.default)
 
@@ -249,11 +258,47 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
       order: REMINDER_SECTION_ORDER,
       text: (context) => {
         const sid = sessionIdOf(context)
-        return isEnabled(sid) ? REMINDER_TEXT : ''
+        if (!isEnabled(sid)) return ''
+        // v0.8.3 miss 闭环：上一条最终回复缺摘要 → 追加合规警告（全局单标记，见事件监听注释）
+        return missGlobal ? REMINDER_TEXT + ' \n\n' + MISS_WARNING : REMINDER_TEXT
       },
     }), 'dsh-concise: reminder section')
   } else {
     log.warn?.('[dsh-concise] systemPrompt service missing — style injection disabled')
+  }
+
+  // 0.6) miss 检测闭环（v0.8.3）：监听会话消息事件，跟踪「最后一条带文本的 assistant 消息」是否以摘要块开头；
+  // user 消息到达 = 上个 turn 结束，此时固化为全局 miss 标记，reminder 据此注入 WARNING（下轮反馈）。
+  // 已知边界：'assistant/message' 载荷不含 sessionId → 全局单标记；并行会话下可能跨会话注入 WARNING，
+  // 该警告本身无害（任何开启 Concise 的会话都应写摘要）。事件不可见的环境静默降级为纯措辞路径。
+  if (typeof ctx.on === 'function') {
+    ctx.effect(() => {
+      const offs: Array<(() => void) | void> = []
+      try {
+        offs.push(ctx.on!('assistant/message', (event) => {
+          try {
+            const content = (event as { message?: { content?: Array<{ type?: string; text?: string }> } }).message?.content ?? []
+            const text = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
+            if (text.trim().length === 0) return
+            lastAssistantSeen = true
+            lastAssistantMissing = !text.trimStart().startsWith('> **摘要：**')
+          } catch { /* 观测失败不阻断消息流 */ }
+        }))
+        offs.push(ctx.on!('user/message', () => {
+          try {
+            if (lastAssistantSeen) missGlobal = lastAssistantMissing
+            lastAssistantMissing = false
+            lastAssistantSeen = false
+          } catch { /* 同上 */ }
+        }))
+        log.info?.('[dsh-concise] digest miss-detection attached (assistant/message + user/message)')
+      } catch (error) {
+        log.warn?.('[dsh-concise] miss-detection attach failed — degraded to wording-only: ' + String(error))
+      }
+      return () => {
+        for (const off of offs) { try { (typeof off === 'function') && off() } catch { /* 卸载幂等 */ } }
+      }
+    }, 'dsh-concise: digest miss detection')
   }
 
   // 2) host 命令 /concise：作用于当前会话

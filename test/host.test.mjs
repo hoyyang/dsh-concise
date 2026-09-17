@@ -16,6 +16,7 @@ function makeEnv() {
 function mockCtx() {
   const sections = []
   const commands = []
+  const listeners = {}
   let apiHandler = null
   const ctx = {
     systemPrompt: { section: (s) => { sections.push(s); return () => {} } },
@@ -25,10 +26,14 @@ function mockCtx() {
       if (deps.includes('webServer')) cb({ webServer: { register: (spec) => { apiHandler = spec.handler; return () => {} } } })
       return {}
     },
+    on: (event, listener) => {
+      listeners[event] = listener
+      return () => { delete listeners[event] }
+    },
     logger: {},
     effect: (fn) => { fn() },
   }
-  return { ctx, sections, commands, api: () => apiHandler }
+  return { ctx, sections, commands, listeners, api: () => apiHandler }
 }
 
 async function callApi(handler, method, url, body) {
@@ -65,10 +70,13 @@ test('registers style + reminder sections with per-session gating', async () => 
   // 0.8.1：长解释型回复是已实证的失效模式（L4 会话 seq388/464），style 与 reminder 都必须点名
   assert.match(style, /Length and structure are NOT exemptions/)
   assert.match(style, /long explanation replies/)
+  assert.match(style, /Task-completion reports/)
   assert.match(reminder, /REMINDER \(Concise output style\)/)
   assert.match(reminder, /摘要 digest blockquote/)
-  assert.match(reminder, /before any heading, table, or body text/)
-  assert.match(reminder, /long explanation replies/)
+  // 0.8.3 自检清单式 reminder：点名交付汇报型与长解释型两大失效模式
+  assert.match(reminder, /SELF-CHECK/)
+  assert.match(reminder, /NEVER carries to the final reply/)
+  assert.match(reminder, /Task-completion reports and long explanations/)
 })
 
 test('LRU evicts redundant-default entries first, preserves explicit user intent', async () => {
@@ -102,4 +110,39 @@ test('legacy 说人话 digest prefix is accepted by client matcher regex', async
   assert.ok(MARK_RE.test('说人话： 老会话输出'))
   assert.ok(!MARK_RE.test('普通引用： 不打卡片'))
   assert.ok(!MARK_RE.test('摘要'))
+})
+
+test('miss-detection: previous final reply without digest injects compliance warning', async () => {
+  makeEnv()
+  const { ctx, sections, listeners, api } = mockCtx()
+  const { apply } = await import('../lib/index.js')
+  apply(ctx)
+  await callApi(api(), 'POST', '/toggle', {})
+  const assistant = listeners['assistant/message']
+  const user = listeners['user/message']
+  assert.ok(typeof assistant === 'function', 'assistant/message listener attached')
+  assert.ok(typeof user === 'function', 'user/message listener attached')
+  const sid = { agent: { session: { id: 's-miss' } } }
+  assistant({ message: { content: [{ type: 'text', text: '全部完成：三件事都已交付。' }] } })
+  user({})
+  const reminder = sections[1].text(sid)
+  assert.match(reminder, /COMPLIANCE WARNING/)
+  assert.match(reminder, /SELF-CHECK/)
+  assistant({ message: { content: [{ type: 'text', text: '> **摘要：** 已完成。' }] } })
+  user({})
+  assert.doesNotMatch(sections[1].text(sid), /COMPLIANCE WARNING/)
+})
+
+test('miss-detection: empty-text assistant messages are ignored', async () => {
+  makeEnv()
+  const { ctx, sections, listeners, api } = mockCtx()
+  const { apply } = await import('../lib/index.js')
+  apply(ctx)
+  await callApi(api(), 'POST', '/toggle', {})
+  const assistant = listeners['assistant/message']
+  const user = listeners['user/message']
+  const sid = { agent: { session: { id: 's-clean' } } }
+  assistant({ message: { content: [{ type: 'reasoning', text: 'thinking' }] } })
+  user({})
+  assert.doesNotMatch(sections[1].text(sid), /COMPLIANCE WARNING/)
 })
