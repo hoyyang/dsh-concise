@@ -100,6 +100,52 @@ export const CHIP_ICONS: Record<string, string> = {
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
 }
 
+/** 上次次探测的系统应用列表（进程内缓存，避免每次点击探测） */
+let cachedApps: string[] | null = null
+
+/**
+ * 通过宿主 open-in-app 路由系统应用真正打开本地路径：
+ * GET /open-in-app/apps 探测 -> POST /open-in-app/open { app, path }，
+ * 应用选择：ＧAO 文件管理器优先（shell-open 可开任何路径），代码类先试 IDE；任何失败返 false（调用方降级复制）＊
+ */
+export async function openViaHost(path: string): Promise<'file' | 'dir' | false> {
+  try {
+    const loc = globalThis.location
+    const base = loc && loc.origin && loc.origin !== 'null' ? loc.origin : 'http://dsh.internal'
+    if (!cachedApps) {
+      const res = await fetch(new URL('/open-in-app/apps', base))
+      if (!res.ok) return false
+      const wrapped = (await res.json()) as { apps?: unknown }
+      const arr = Array.isArray(wrapped?.apps) ? wrapped.apps : []
+      cachedApps = arr.map((x) => (typeof x === 'string' ? x : (x as { id?: string })?.id)).filter((x): x is string => typeof x === 'string' && x.length > 0)
+    }
+    const apps = cachedApps
+    if (!apps || apps.length === 0) return false
+    const has = (id: string): boolean => apps.includes(id)
+    const info = detectPathKind(path)
+    const preferred =
+      info.kind === 'code' || info.kind === 'markdown'
+        ? ['cursor', 'vscode', 'finder', 'explorer', 'filemanager']
+        : ['finder', 'explorer', 'filemanager', 'cursor', 'vscode']
+    const appId = preferred.find((id) => has(id)) ?? apps[0]
+    const launch = async (target: string): Promise<boolean> => {
+      const res = await fetch(new URL('/open-in-app/open', base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ app: appId, path: target }),
+      })
+      return res.ok
+    }
+    // 宿主 open 路由的 wire 校验只接受已存在目录：文件路径 404 时回退其所在目录（Finder 定位到同级）
+    if (await launch(path)) return 'file'
+    const parent = path.replace(/\/[^/]+\/?$/, '') || '/'
+    if (parent !== path && (await launch(parent))) return 'dir'
+    return false
+  } catch {
+    return false
+  }
+}
+
 /** 判断节点是否已在 chip 或链接内（避免重复处理）。 */
 function insideChip(node: Node | null): boolean {
   let cur: Node | null = node
@@ -121,17 +167,33 @@ function buildChip(value: string, isUrl: boolean): Element {
     a.href = value
     a.target = '_blank'
     a.rel = 'noopener noreferrer'
+    // v0.8.6 显式跳转，不依足 <a> 默认行为）
+    el.addEventListener('click', (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      try { window.open(value, '_blank', 'noopener') } catch { /* 降级 */ }
+    })
   } else {
     const path = value
-    el.title = info.label + ' · 点击复制路径'
+    el.title = info.label + ' · 点击用系统应用打开'
     el.addEventListener('click', (ev) => {
       ev.stopPropagation()
-      try {
-        void navigator.clipboard?.writeText(path).then(() => {
-          el.classList.add('dcc-copied')
-          window.setTimeout(() => el.classList.remove('dcc-copied'), 1300)
-        }).catch(() => {})
-      } catch { /* 勎切板不可用 */ }
+      void openViaHost(path).then((opened) => {
+        if (opened) {
+          el.classList.add('dcc-opened')
+          el.dataset.opened = opened
+          window.setTimeout(() => el.classList.remove('dcc-opened'), 1800)
+        } else {
+          void navigator.clipboard?.writeText(path).then(() => {
+            el.classList.add('dcc-copied')
+            window.setTimeout(() => el.classList.remove('dcc-copied'), 1300)
+          }).catch(() => {})
+        }
+      }).catch(() => {
+        void navigator.clipboard?.writeText(path).catch(() => {})
+        el.classList.add('dcc-copied')
+        window.setTimeout(() => el.classList.remove('dcc-copied'), 1300)
+      })
     })
   }
   const iconHost = document.createElement('span')

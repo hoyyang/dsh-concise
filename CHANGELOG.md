@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.6] - 2026-09-17
+
+### Fixed
+- 点击 chip 无动作（用户报告「只复制不跳转/不打开」）：
+  ① URL chip 改为显式 window.open 跳转（不依赖 <a> 默认行为，任何宿主点击拦截都不影响）。
+  ② 本地文件 chip 接入宿主 open-in-app 系统打开路由，点击真正用系统应用打开：GET /open-in-app/apps
+     探测（响应形态 {apps:[…]}，0.8.5 只认裸数组导致永远走复制降级——已修）→ POST /open-in-app/open。
+     宿主 wire 校验只接受已存在目录：文件路径 404 时自动回退打开所在目录（Finder 定位）；
+     应用选择 = OS 文件管理器优先（shell-open 可开任何路径）、代码类先试 cursor/vscode；
+     打开失败自动降级复制路径。徽标：已打开 ✓ / 已复制 ✓。
+- 划选复制（mouseup 划选→松开复制）不受影响：chip click 的 stopPropagation 仅作用于 chip 自身 click。
+
+### Verified
+- 真机（playwright）：点击 URL chip 新 tab 打开目标页；点击文件 chip → POST 404（文件）→ 自动目录回退
+  → POST 200（Finder 打开）。host 5/5 + chips 5/5。
+
 ## [0.8.5] - 2026-09-17
 
 ### Added
