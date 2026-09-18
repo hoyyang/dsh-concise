@@ -1,0 +1,4 @@
+[
+  { "id": "S5-个人路径", "match": "/Users/demo" },
+  { "id": "S4-内链", "match": "feishu.cn" }
+]
