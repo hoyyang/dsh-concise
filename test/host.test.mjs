@@ -112,35 +112,47 @@ test('legacy 说人话 digest prefix is accepted by client matcher regex', async
   assert.ok(!MARK_RE.test('摘要'))
 })
 
-test('compliance waterfall: previous final reply without digest appends warning to assembly', async () => {
+test('isDigestMissing: detects missing/clean/fresh/unjudgeable session shapes', async () => {
   makeEnv()
-  const { ctx, listeners, api } = mockCtx()
+  const { isDigestMissing, DIGEST_MARK } = await import('../lib/index.js')
+  assert.equal(DIGEST_MARK, '> **摘要：**')
+  // 缺摘要（交付汇报型开场）→ true
+  assert.equal(isDigestMissing({ id: 'a', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '全部完成：交付物如下。' }] }] }), true)
+  // 以摘要块开头（含前置空白）→ false
+  assert.equal(isDigestMissing({ id: 'b', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '  > **摘要：** 结论在前。' }] }] }), false)
+  // 多 content 块拼接后判定 → false
+  assert.equal(isDigestMissing({ id: 'c', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '>' }, { type: 'text', text: ' **摘要：** ok' }] }] }), false)
+  // 首轮无 assistant 历史 → true（首轮保护）
+  assert.equal(isDigestMissing({ id: 'd', deriveMessages: () => [] }), true)
+  // 最后一条是 user（assistant 在更早）→ 只看最后一条 assistant
+  assert.equal(isDigestMissing({ id: 'e', deriveMessages: () => [
+    { role: 'assistant', content: [{ type: 'text', text: '> **摘要：** ok' }] },
+    { role: 'user', content: [{ type: 'text', text: '继续' }] },
+  ] }), false)
+  // 不可判形态：无 session / 无 deriveMessages / 抛异常 → false（不告警不阻断）
+  assert.equal(isDigestMissing(undefined), false)
+  assert.equal(isDigestMissing(null), false)
+  assert.equal(isDigestMissing({ id: 'f' }), false)
+  assert.equal(isDigestMissing({ id: 'g', deriveMessages: () => { throw new Error('boom') } }), false)
+})
+
+test('reminder section embeds compliance warning when previous final reply missed the digest', async () => {
+  makeEnv()
+  const { ctx, sections, api } = mockCtx()
   const { apply } = await import('../lib/index.js')
   apply(ctx)
   await callApi(api(), 'POST', '/toggle', {})
-  const waterfall = listeners['system-prompt/assemble']
-  assert.ok(typeof waterfall === 'function', 'assemble waterfall attached')
-  const session = { id: 'session-w1', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '全部完成：交付物如下。' }] }] }
-  const assembled = await waterfall({ agent: { session } }, () => Promise.resolve({ system: 'base prompt' }))
-  assert.match(assembled.system, /COMPLIANCE WARNING/)
-  assert.match(assembled.system, /base prompt/)
+  const reminder = sections[1]
+  const context = { agent: { session: { id: 'session-w1', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '## 全部完成' }] }] } } }
+  const warned = reminder.text(context)
+  assert.match(warned, /REMINDER \(Concise output style\)/)
+  assert.match(warned, /COMPLIANCE WARNING/)
+  assert.ok(warned.indexOf('REMINDER') < warned.indexOf('COMPLIANCE WARNING'), 'warning appended after reminder')
+  // 干净回复 → 只有 reminder，无警告
+  const clean = { agent: { session: { id: 'session-w2', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '> **摘要：** ok' }] }] } } }
+  assert.doesNotMatch(reminder.text(clean), /COMPLIANCE WARNING/)
+  // 开关关闭 → 空串（门控优先）
+  await callApi(api(), 'POST', '/set', { sessionId: 'session-w3', enabled: false })
+  const offCtx = { agent: { session: { id: 'session-w3', deriveMessages: () => [] } } }
+  assert.equal(reminder.text(offCtx), '')
 })
-
-test('compliance waterfall: clean last reply and fresh session produce no warning', async () => {
-  makeEnv()
-  const { ctx, listeners, api } = mockCtx()
-  const { apply } = await import('../lib/index.js')
-  apply(ctx)
-  await callApi(api(), 'POST', '/toggle', {})
-  const waterfall = listeners['system-prompt/assemble']
-  // 带摘要的最后一条 assistant → 无警告
-  const ok = { id: 'session-w2', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '> **摘要：** 结论。' }] }] }
-  const a1 = await waterfall({ agent: { session: ok } }, () => Promise.resolve({ system: 'base' }))
-  assert.doesNotMatch(a1.system, /COMPLIANCE WARNING/)
-  // 全新会话（无任何消息）→ 首轮保护：带警告
-  const fresh = { id: 'session-w3', deriveMessages: () => [] }
-  const a2 = await waterfall({ agent: { session: fresh } }, () => Promise.resolve({ system: 'base' }))
-  assert.match(a2.system, /COMPLIANCE WARNING/)
-})
-
-

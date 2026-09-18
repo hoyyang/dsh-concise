@@ -435,30 +435,69 @@ export function apply(ctx: ClientContext): void {
   // 0.5) 精华摘要卡渲染增强（v0.8）：消息流里以「摘要：」开头的 blockquote → 打样式类变圆角高亮卡。
   // 兼容 0.7 之前旧标签「说人话：」的历史消息（否则旧会话卡片永久退化为普通引用块）。
   // 监听 body 子树（markdown 重渲染频繁，rAF 合批）；匹配按 tag+文本前缀，不命中不加样式（原生引用块兜底）。
+  //
+  // v0.9.2 核心修复（摘要卡冻结在流式中间帧）：卡内 DOM 改写（链接兜底 / chip 化）会 replaceChild
+  // 换掉宿主 React 正在维护的文本节点——流式中途执行后，宿主后续增量更新打到已被摘除的「幽灵节点」，
+  // 卡片内容就冻结在 chip 化那一刻（实证：屏幕显示与持久化转写不一致，切会话重挂载才恢复完整）。
+  // 修复 = 卡片样式类即时挂（className 不影响 React 文本更新），DOM 改写延迟到「内容连续 STABLE_MS
+  // 无变化」（近似流式结束）；此后内容再变（宿主重渲染覆盖插件 DOM）→ 重置窗口重来，chip 缺失即补挂。
   ctx.effect(() => {
     if (typeof document === 'undefined') return
     const MARK_RE = /^(摘要：|说人话：)/
+    const STABLE_MS = 1200
+    interface CardState { sig: string; enhanced: boolean; timer: number | undefined }
+    const cards = new Map<Element, CardState>()
     let queued = 0
+    const contentSig = (bq: Element): string => {
+      const text = bq.textContent ?? ''
+      return text.length + '|' + text.slice(0, 24) + '|' + text.slice(-48)
+    }
+    const enhanceCard = (bq: Element): void => {
+      // v0.8.2：宿主 linkify 会把紧贴 URL 的粗体标记与中文句读吞进 href（实测 …/xxx**%E3%80%82），
+      // 摘要卡内做确定性兜底修复；标准 [label](url) 链接不受影响，此步对它们是 no-op。
+      for (const a of Array.from(bq.querySelectorAll('a[href]'))) {
+        const href = a.getAttribute('href') ?? ''
+        const fixedHref = normalizeDigestHref(href)
+        if (fixedHref !== href) a.setAttribute('href', fixedHref)
+        const text = a.textContent ?? ''
+        const fixedText = normalizeDigestText(text)
+        if (fixedText !== text) a.textContent = fixedText
+      }
+      // v0.8.5：卡内路径 chip 化（网页跳转 / 本地文件点击复制，类型图标 + 协调动效）
+      applyChipEnhancement(bq)
+    }
     const scan = (): void => {
       queued = 0
       for (const bq of Array.from(document.querySelectorAll('blockquote'))) {
         const hit = MARK_RE.test((bq.textContent ?? '').trimStart())
         bq.classList.toggle('dsh-concise-digest', hit)
         if (hit && !bq.title) bq.title = '划选卡内文字，松开即复制'
-        // v0.8.2：宿主 linkify 会把紧贴 URL 的粗体标记与中文句读吞进 href（实测 …/xxx**%E3%80%82），
-        // 摘要卡内做确定性兜底修复；标准 [label](url) 链接不受影响，此步对它们是 no-op。
-        if (hit) {
-          for (const a of Array.from(bq.querySelectorAll('a[href]'))) {
-            const href = a.getAttribute('href') ?? ''
-            const fixedHref = normalizeDigestHref(href)
-            if (fixedHref !== href) a.setAttribute('href', fixedHref)
-            const text = a.textContent ?? ''
-            const fixedText = normalizeDigestText(text)
-            if (fixedText !== text) a.textContent = fixedText
-          }
+        if (!hit) { cards.delete(bq); continue }
+        let st = cards.get(bq)
+        if (!st) { st = { sig: '', enhanced: false, timer: undefined }; cards.set(bq, st) }
+        const sig = contentSig(bq)
+        if (sig !== st.sig) {
+          st.sig = sig
+          st.enhanced = false
+          if (st.timer !== undefined) window.clearTimeout(st.timer)
+          const card = bq
+          const state = st
+          state.timer = window.setTimeout(() => {
+            state.timer = undefined
+            if (!card.isConnected) { cards.delete(card); return }
+            enhanceCard(card)
+            state.enhanced = true
+          }, STABLE_MS)
+        } else if (st.enhanced && st.timer === undefined && bq.querySelector('.dsh-concise-chip') === null) {
+          // 内容未变但 chip 不在了（宿主重渲染覆盖了插件 DOM）：稳定内容直接补挂（幂等）
+          enhanceCard(bq)
         }
-          // v0.8.5：卡内路径 chip 化（网页跳转 / 本地文件点击复制，类型图标 + 协调动效）
-          applyChipEnhancement(bq)
+      }
+      for (const [el, st] of cards) {
+        if (!el.isConnected) {
+          if (st.timer !== undefined) window.clearTimeout(st.timer)
+          cards.delete(el)
+        }
       }
     }
     const schedule = (): void => {
@@ -493,6 +532,8 @@ export function apply(ctx: ClientContext): void {
       observer.disconnect()
       document.removeEventListener('mouseup', onMouseUp)
       if (queued) { cancelAnimationFrame(queued); queued = 0 }
+      for (const [, st] of cards) { if (st.timer !== undefined) window.clearTimeout(st.timer) }
+      cards.clear()
       // 卸载即净：摘除本插件添加的卡片样式类与状态标记
       document.querySelectorAll('.dsh-concise-digest').forEach((node) => {
         node.classList.remove('dsh-concise-digest')

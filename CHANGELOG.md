@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.2] - 2026-09-18
+
+### Fixed
+- **摘要卡冻结在流式中间帧（用户实测 autofill-ai-parser 会话）**：屏幕上摘要卡内容与持久化转写不一致（中间稿措辞），切会话重进才恢复完整。根因：卡内 chip 化在流式中途 replaceChild 换掉宿主 React 正在维护的文本节点，后续增量更新全部打到已被摘除的「幽灵节点」；整条回复只有摘要卡截断，因为只有它被插件动过内部 DOM。修复 = 卡片样式类即时挂（className 不干扰 React 文本更新），链接兜底与 chip 化延迟到「内容连续 1.2s 无变化」（近似流式结束）；内容再变 → 重置窗口重来，chip 被宿主重渲染覆盖后自动补挂（幂等）。交互差异：流式刚结束时 chip 延迟约 1.2s 出现。
+- **合规警告（miss 反馈闭环）真机从未生效**：0.8.4 的 system-prompt/assemble waterfall 通道探针实证「事件可达、判定正确、注入无效」——assemble payload 形状是 { sections, tools, variables }，没有 system/developer 字符串，appendWarning 静默原样返回（staging 通过系 mock 形状失真）。重构 = miss 检测移入 reminder section 的 text(context)（section 通道可达性经真机实证），抽出纯函数 isDigestMissing（不可判一律不告警、绝不阻断组装）；废弃 waterfall 监听。会话 cwd 缓存刷新点随迁至 complianceWarning（每轮求值）。
+- 顺带修复：src/index.ts 中 validateOpenTarget 的空格字符曾被写入事故替换为 NUL 字节（含空格路径无法点击打开）；已还原。
+- 回归测试：waterfall 两个用例重写为 isDigestMissing 七形态 + reminder 内嵌组合用例（mock 调用签名与真机派发对齐：assembly/context/next 三参）。
+
 ## [0.9.1] - 2026-09-18
 
 ### Fixed

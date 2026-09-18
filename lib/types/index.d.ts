@@ -64,6 +64,22 @@ interface CommandsLike {
         };
     }) => () => void;
 }
+/** Minimal duck type of the live session object reachable from assemble context. */
+interface SessionLike {
+    id: unknown;
+    header?: {
+        cwd?: string;
+    };
+    deriveMessages?: () => unknown;
+}
+/** 摘要块起始标记（host 侧判定口径；与 client MARK_RE 渲染口径同源）。 */
+export declare const DIGEST_MARK = "> **\u6458\u8981\uFF1A**";
+/**
+ * 检查会话派生历史里「最后一条 assistant 消息」是否以摘要块开头。
+ * 返回 true = 缺摘要（含首轮尚无 assistant 历史）；上下文不可判（无 session / deriveMessages /
+ * 求值异常）一律返回 false —— 不可判时不告警，绝不阻断组装。纯函数，供 section 求值与单测共用。
+ */
+export declare function isDigestMissing(session: SessionLike | undefined | null): boolean;
 interface HostContext {
     systemPrompt?: SystemPromptLike;
     commands?: CommandsLike;
@@ -73,8 +89,6 @@ interface HostContext {
         error?: (...args: unknown[]) => void;
     };
     effect: (fn: () => unknown | (() => void), label?: string) => void;
-    /** cordis 事件订阅（可选）： miss 检测闭环用；环境无此能力时静默降级为纯措辞。 */
-    on?: (event: string, listener: (payload: unknown) => void) => (() => void) | void;
     /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
     inject: (deps: string[], callback: (scoped: {
         webServer: WebServerLike;

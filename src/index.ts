@@ -169,7 +169,7 @@ function openWithDefaultApp(path: string): void {
 /** 校验 open 目标：绝对路径 + 存在。非法返回 null。 */
 function validateOpenTarget(path: string): string | null {
   if (typeof path !== 'string' || path.length === 0 || path.length > 1024) return null
-  if (path.includes(' ') || !path.startsWith('/')) return null
+  if (path.includes(' ') || !path.startsWith('/')) return null
   return existsSync(path) ? path : null
 }
 
@@ -201,25 +201,36 @@ interface CommandsLike {
     handler: (invocation: CommandInvocation) => { kind: 'success' | 'error'; text: string }
   }) => () => void
 }
-/** Assembled prompt (minimal duck type; system/developer are the model-facing strings). */
-interface AssembledLike {
-  system?: string
-  developer?: string
-  [key: string]: unknown
-}
-
 /** Minimal duck type of the live session object reachable from assemble context. */
 interface SessionLike {
   id: unknown
   header?: { cwd?: string }
   deriveMessages?: () => unknown
 }
+/** 摘要块起始标记（host 侧判定口径；与 client MARK_RE 渲染口径同源）。 */
+export const DIGEST_MARK = '> **摘要：**'
 
-/** Append the compliance warning to the assembled prompt (smart-compact compatible shape). */
-function appendWarning(assembled: AssembledLike, text: string): AssembledLike {
-  if (typeof assembled?.system === 'string') return { ...assembled, system: assembled.system + '\n\n' + text }
-  if (typeof assembled?.developer === 'string') return { ...assembled, developer: assembled.developer + '\n\n' + text }
-  return assembled
+/**
+ * 检查会话派生历史里「最后一条 assistant 消息」是否以摘要块开头。
+ * 返回 true = 缺摘要（含首轮尚无 assistant 历史）；上下文不可判（无 session / deriveMessages /
+ * 求值异常）一律返回 false —— 不可判时不告警，绝不阻断组装。纯函数，供 section 求值与单测共用。
+ */
+export function isDigestMissing(session: SessionLike | undefined | null): boolean {
+  if (!session || typeof session.deriveMessages !== 'function') return false
+  try {
+    const msgs = (session.deriveMessages() ?? []) as Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>
+    let lastAssistant = ''
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]?.role === 'assistant') {
+        lastAssistant = (msgs[i].content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
+        break
+      }
+    }
+    const trimmed = lastAssistant.trimStart()
+    return trimmed.length === 0 || !trimmed.startsWith(DIGEST_MARK)
+  } catch {
+    return false
+  }
 }
 
 interface HostContext {
@@ -227,8 +238,6 @@ interface HostContext {
   commands?: CommandsLike
   logger?: { info?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void }
   effect: (fn: () => unknown | (() => void), label?: string) => void
-  /** cordis 事件订阅（可选）： miss 检测闭环用；环境无此能力时静默降级为纯措辞。 */
-  on?: (event: string, listener: (payload: unknown) => void) => (() => void) | void
   /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
   inject: (deps: string[], callback: (scoped: { webServer: WebServerLike }) => unknown) => unknown
 }
@@ -263,7 +272,6 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
   const state = loadState(config.defaultEnabled ?? false)
   const log = ctx.logger ?? {}
 
-
   const isEnabled = (sessionId: string | null): boolean =>
     sessionId === null ? state.default : (state.sessions[sessionId]?.enabled ?? state.default)
 
@@ -296,68 +304,40 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
       text: (context) => {
         const sid = sessionIdOf(context)
         if (!isEnabled(sid)) return ''
-        // v0.8.3 miss 闭环：上一条最终回复缺摘要 → 追加合规警告（全局单标记，见事件监听注释）
-        return isEnabled(sid) ? REMINDER_TEXT : ''
+        // v0.9.2 miss 闭环：每轮组装在此求值（section 通道可达性经真机实证），检查上一条
+        // 最终回复是否缺摘要；缺失（或首轮无 assistant 历史）时在尾部提醒后附合规警告。
+        // v0.8.4 的 system-prompt/assemble waterfall 通道废弃：事件可达且判定正确（探针实证），
+        // 但 assemble payload 形状是 { sections, tools, variables }，没有 system/developer 字符串，
+        // appendWarning 静默丢弃警告（真机 web 从未生效；staging 通过系 mock 形状失真）。
+        return REMINDER_TEXT + complianceWarning(context)
       },
     }), 'dsh-concise: reminder section')
   } else {
     log.warn?.('[dsh-concise] systemPrompt service missing — style injection disabled')
   }
 
-  // v0.8.7：会话 cwd 缓存（waterfall 每轮从 session.header.cwd 刷新；client chip 解析相对路径用）
-  const cwdBySession = new Map<string, string>()
-  let lastKnownCwd = ''
-
-  // 0.6) 合规反馈闭环（v0.8.4 真实现）：system-prompt/assemble waterfall 每轮组装时同步读当前会话派生
-  // 历史（session.deriveMessages()），检查最后一条 assistant 消息是否以摘要块开头；缺失（或首轮尚无
-  // assistant 历史）则向 assembly 追加 COMPLIANCE WARNING。逐会话判定、覆盖首轮、无事件可达性依赖
-  // （0.8.3 的 assistant/message 事件经实测不派发到插件，已废弃）。回调失败仅吞掉本次警告，不阻断组装。
-  if (typeof ctx.on === 'function') {
-    ctx.effect(() => {
-      const offs: Array<(() => void) | void> = []
-      try {
-        offs.push(ctx.on!('system-prompt/assemble', async (...args: unknown[]) => {
-          const next = args[args.length - 1] as () => Promise<AssembledLike>
-          const assembled = await next()
-          try {
-            const context = (args.length >= 2 ? args[args.length - 2] : undefined) as { agent?: { session?: SessionLike } } | undefined
-            const session = context?.agent?.session
-            if (!session || typeof session.deriveMessages !== 'function') return assembled
-            const rawId = session.id
-            const sid = typeof rawId === 'function' ? String(rawId()) : String(rawId)
-            if (!isEnabled(sid)) return assembled
-            const hdr = session.header
-            const cwd = hdr?.cwd
-            if (typeof cwd === 'string' && cwd.length > 0) { cwdBySession.set(sid, cwd); lastKnownCwd = cwd }
-            const msgs = (session.deriveMessages() ?? []) as Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>
-            let lastAssistant = ''
-            for (let i2 = msgs.length - 1; i2 >= 0; i2--) {
-              if (msgs[i2]?.role === 'assistant') {
-                lastAssistant = (msgs[i2].content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
-                break
-              }
-            }
-            const trimmed = lastAssistant.trimStart()
-            const missing = trimmed.length === 0 ? true : !trimmed.startsWith('> **摘要：**')
-            if (!missing) return assembled
-            const warn = MISS_WARNING + '\n\n' + '(Compliance check: the previous final reply in this session opened without the 摘要 digest blockquote — this session is on notice.)'
-            return appendWarning(assembled, warn)
-          } catch { return assembled }
-        }))
-        log.info?.('[dsh-concise] digest compliance waterfall attached (system-prompt/assemble)')
-      } catch (error) {
-        log.warn?.('[dsh-concise] compliance waterfall attach failed: ' + String(error))
-      }
-      return () => {
-        for (const off of offs) { try { (typeof off === 'function') && off() } catch { /* 卸载幂等 */ } }
-      }
-    }, 'dsh-concise: digest compliance waterfall')
+  /** 上一条最终回复缺摘要时返回追加到尾部提醒后的合规警告；无法判定返回空串。
+   *  顺带刷新会话 cwd 缓存（每轮组装至少经过此处一次；v0.9.2 起这是 cwd 唯一刷新点）。 */
+  function complianceWarning(context: unknown): string {
+    try {
+      const session = (context as { agent?: { session?: SessionLike } } | undefined)?.agent?.session
+      const rawId = session?.id
+      const sid = typeof rawId === 'function' ? String(rawId()) : typeof rawId === 'string' ? rawId : null
+      const cwd = session?.header?.cwd
+      if (sid !== null && typeof cwd === 'string' && cwd.length > 0) { cwdBySession.set(sid, cwd); lastKnownCwd = cwd }
+      if (!isDigestMissing(session)) return ''
+      log.info?.('[dsh-concise] previous final reply missed the digest - compliance warning attached for session ' + (sid ?? ''))
+      return '\n\n' + MISS_WARNING + '\n\n(Compliance check: the previous final reply in this session opened without the 摘要 digest blockquote — this session is on notice.)'
+    } catch {
+      return ''
+    }
   }
 
-  // 0.6) miss 检测闭环（v0.8.3）：监听会话消息事件，跟踪「最后一条带文本的 assistant 消息」是否以摘要块开头；
-  // user 消息到达 = 上个 turn 结束，此时固化为全局 miss 标记，reminder 据此注入 WARNING（下轮反馈）。
-  // 已知边界：'assistant/message' 载荷不含 sessionId → 全局单标记；并行会话下可能跨会话注入 WARNING，
-  // 该警告本身无害（任何开启 Concise 的会话都应写摘要）。事件不可见的环境静默降级为纯措辞路径。
+
+  // v0.8.7：会话 cwd 缓存（v0.9.2 起在 complianceWarning 每轮求值时从 session.header.cwd 刷新；
+  // client chip 解析相对路径用）
+  const cwdBySession = new Map<string, string>()
+  let lastKnownCwd = ''
 
   // 2) host 命令 /concise：作用于当前会话
   if (ctx.commands) {
