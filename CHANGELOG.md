@@ -3,11 +3,31 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] - 2026-09-18
+
+### Added
+- **摘要卡交付物聚合区**：回答里生成的产物文件不再要求模型写进摘要文本——client 端在摘要卡内容稳定后
+  （复用 1.2s 稳定窗口）扫描同一条回复全文（_markdown 容器，fallback 启发式向上找），把卡片之外的
+  文件路径以「交付物 · FILES」chip 区列在卡片底部，点击 = 既有交互（cwd 解析 + OS 默认应用打开）。
+  排除 URL 与目录、卡内已有路径不重复列、去重按出现顺序、上限 8 个；容器不可判退化为只扫卡内；
+  无文件不渲染（卡片外观零变化）。业界参照：Copilot Studio「代理创建的文件」/ Claude Artifacts /
+  开源 chat 的 Files-in-chat 面板（借鉴改造，无现成 dsh 插件）。
+
+### Fixed
+- **扩展名交替顺序截断（0.8.5 起）**：路径识别正则的扩展名交替「先短后长」（h 在 html 前、js 在 json 前、
+  doc 在 docx 前），正则交替先到先得导致 .html→.h、.json→.js、.docx→.doc、.xlsx→.xls、.cpp/.css/.csv→.c
+  路径残缺——chip 与交付物聚合区点击打开必失败。全部改为长优先排序。
+- **摘要卡遵循强化（用户实测：拍板提问型回复漏摘要）**：miss 警告此前只追加在 system prompt 尾部
+  （reminder 之后），在 80K+ 字符 prompt 里被模型持续忽略（转写逐轮实证：警告在，摘要依旧缺）。
+  现在 miss 时把首屏警告（COMPLIANCE ALERT）插到 style section 最开头——模型最先读到的位置，
+  尾部 WARNING 保留双保险；style 与 reminder 措辞点名「以 ask_user_question 拍板提问结尾的回复
+  同样是 user-facing final reply，不得豁免」。
+
 ## [0.9.2] - 2026-09-18
 
 ### Fixed
 - **摘要卡冻结在流式中间帧（用户实测 autofill-ai-parser 会话）**：屏幕上摘要卡内容与持久化转写不一致（中间稿措辞），切会话重进才恢复完整。根因：卡内 chip 化在流式中途 replaceChild 换掉宿主 React 正在维护的文本节点，后续增量更新全部打到已被摘除的「幽灵节点」；整条回复只有摘要卡截断，因为只有它被插件动过内部 DOM。修复 = 卡片样式类即时挂（className 不干扰 React 文本更新），链接兜底与 chip 化延迟到「内容连续 1.2s 无变化」（近似流式结束）；内容再变 → 重置窗口重来，chip 被宿主重渲染覆盖后自动补挂（幂等）。交互差异：流式刚结束时 chip 延迟约 1.2s 出现。
-- **合规警告（miss 反馈闭环）真机从未生效**：0.8.4 的 system-prompt/assemble waterfall 通道探针实证「事件可达、判定正确、注入无效」——assemble payload 形状是 { sections, tools, variables }，没有 system/developer 字符串，appendWarning 静默原样返回（staging 通过系 mock 形状失真）。重构 = miss 检测移入 reminder section 的 text(context)（section 通道可达性经真机实证），抽出纯函数 isDigestMissing（不可判一律不告警、绝不阻断组装）；废弃 waterfall 监听。会话 cwd 缓存刷新点随迁至 complianceWarning（每轮求值）。
+- **合规警告（miss 反馈闭环）通道重构**：0.9.2 发布时的表述「waterfall 真机从未生效」经后续转写逐轮复查修正——waterfall 版在正式组装轮的注入大部分有效（COMPLIANCE WARNING 实际出现在多轮 system prompt 中），当时误把「上下文预算预组装」（user 消息前数毫秒、不进模型的组装）当成正式组装证据。真实缺口只有两处：会话首轮组装早于监听 attach 的时序窗，以及模型在超长 system prompt 里持续忽略尾部警告（见 0.10.0 首屏警告）。0.9.2 的重构（miss 检测移入 reminder section text(context)、纯函数 isDigestMissing 不可判不告警不阻断、cwd 缓存刷新随迁）保留——通道简化且消除 attach 时序窗，行为与 waterfall 版等效。
 - 顺带修复：src/index.ts 中 validateOpenTarget 的空格字符曾被写入事故替换为 NUL 字节（含空格路径无法点击打开）；已还原。
 - 回归测试：waterfall 两个用例重写为 isDigestMissing 七形态 + reminder 内嵌组合用例（mock 调用签名与真机派发对齐：assembly/context/next 三参）。
 

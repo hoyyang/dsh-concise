@@ -61,10 +61,14 @@ export interface PathSegment {
  * 与宿主 linkify 的贪婪行为相反——宁可漏识别不可错切断）。
  */
 export function splitPathSegments(text: string): PathSegment[] {
+  // v0.10.0 修复：扩展名交替「长优先」——旧顺序 h 在 html 前 / js 在 json 前 / doc 在 docx 前，
+  // 正则交替先到先得导致 .html→.h、.json→.js、.docx→.doc、.xlsx→.xls、.cpp/.css/.csv→.c 截断
+  //（路径残缺，点击打开必失败）。同前缀对全部改为长 extension 在前（docx|doc、xlsx|xls、tsx|ts、
+  // json 在 jsx|js 前、html|htm 在 h 前、markdown 在 md 前、csv|css 在 c 前）。
   const PATTERN = new RegExp(
     '(https?:\\/\\/[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]+' +
     '|(?:(?:~/)|(?:/(?:Users|home|tmp|var|opt|etc|private|data|System)))[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]*' +
-    '|[A-Za-z0-9_\\-./]+\\.(?:png|jpe?g|gif|webp|svg|bmp|ico|pdf|docx?|rtf|xlsx?|csv|java|kt|tsx?|jsx?|py|go|rs|c|cpp|h|hpp|sh|bash|sql|swift|markdown|md|txt|json|ya?ml|xml|html?|css|zip|tar|gz|rar|7z))',
+    '|[A-Za-z0-9_\\-./]+\\.(?:png|jpeg|jpg|gif|webp|svg|bmp|ico|pdf|docx|doc|rtf|xlsx|xls|csv|css|java|kt|tsx|ts|json|jsx|js|py|go|rs|swift|bash|sh|sql|hpp|html|htm|markdown|md|txt|ya?ml|xml|zip|tar|gz|rar|7z|cpp|c))',
     'g',
   )
   const out: PathSegment[] = []
@@ -146,6 +150,31 @@ export async function openViaHost(path: string): Promise<'file' | 'dir' | false>
   }
 }
 
+/**
+ * 交付物聚合（v0.10.0）：从整条回复文本中提取「值得列出的文件」，供摘要卡底部聚合区展示。
+ * - replyText：同一条回复的全文（_markdown 容器）；cardText：摘要卡自身文本。
+ * - 排除：URL（kind=link）、目录（kind=folder）、卡内文本已出现的（不重复列）。
+ * - 保留出现顺序、去重、上限 limit（默认 8）。
+ * 纯函数，供 client 渲染与单测共用。
+ */
+export function collectDeliverables(replyText: string, cardText: string, limit = 8): string[] {
+  const card = cardText ?? ''
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const seg of splitPathSegments(replyText ?? '')) {
+    if (seg.type !== 'url' && seg.type !== 'file') continue
+    const value = seg.value
+    if (seen.has(value) || card.includes(value)) continue
+    // URL 不入列（用户要的是文件）；目录（无扩展名）不入列
+    const kind = detectPathKind(value)
+    if (kind.kind === 'link' || kind.kind === 'folder') continue
+    seen.add(value)
+    out.push(value)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 /** 判断节点是否已在 chip 或链接内（避免重复处理）。 */
 function insideChip(node: Node | null): boolean {
   let cur: Node | null = node
@@ -164,7 +193,7 @@ function mark(el: HTMLElement, cls: string): void {
 }
 
 /** 构造单个 chip 元素（路径用 textContent 注入，防 HTML 注入；本地文件点击复制路径）。 */
-function buildChip(value: string, isUrl: boolean): Element {
+export function buildChip(value: string, isUrl: boolean): Element {
   const info = detectPathKind(value)
   const el = document.createElement(isUrl ? 'a' : 'span')
   el.className = 'dsh-concise-chip dsh-concise-chip-' + info.kind
@@ -186,28 +215,34 @@ function buildChip(value: string, isUrl: boolean): Element {
     el.addEventListener('click', (ev: Event) => { const me = ev as MouseEvent;
       ev.stopPropagation()
       void (async () => {
-        // cwd from host assemble cache -- resolve relative to absolute
-        let cwd = ''
+        // v0.10.0：cwd 候选依次尝试——历史会话的内存缓存可能为空（重装后未组装），
+        // host 返回 candidates（内存缓存 + 最近会话转写磁盘兜底）；open 400 = 目标不存在，
+        // 无副作用，可安全连续尝试；全败降级复制原始路径。
+        let candidates: string[] = []
         try {
           const res = await fetch('/dsh-concise/api/cwd')
           if (res.ok) {
-            const j = (await res.json()) as { cwd?: string }
-            if (typeof j.cwd === 'string') cwd = j.cwd
+            const j = (await res.json()) as { cwd?: string; candidates?: unknown }
+            const list = Array.isArray(j.candidates) ? j.candidates : []
+            candidates = [j.cwd ?? '', ...list.filter((c): c is string => typeof c === 'string')]
+              .filter((c, i, arr) => c.length > 0 && arr.indexOf(c) === i)
           }
         } catch { /* cwd unavailable */ }
-        const abs = resolveAbsolute(path, cwd, "")
-        // v0.9.0: unified host /open -- OS default app opens file/dir
-        try {
-          const res2 = await fetch('/dsh-concise/api/open', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ path: abs }),
-          })
-          if (res2.ok) {
-            mark(el as HTMLElement, 'dcc-opened')
-            return
-          }
-        } catch { /* degrade */ }
+        if (candidates.length === 0) candidates = ['']
+        for (const cwd of candidates) {
+          const abs = resolveAbsolute(path, cwd, '')
+          try {
+            const res2 = await fetch('/dsh-concise/api/open', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ path: abs }),
+            })
+            if (res2.ok) {
+              mark(el as HTMLElement, 'dcc-opened')
+              return
+            }
+          } catch { /* degrade */ }
+        }
         try { await navigator.clipboard?.writeText(path) } catch { /* degrade */ }
         mark(el as HTMLElement, 'dcc-copied')
       })()

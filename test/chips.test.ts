@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { detectPathKind, splitPathSegments } from '../src/client/chips.ts'
+import { detectPathKind, splitPathSegments, collectDeliverables } from '../src/client/chips.ts'
 
 test('detectPathKind maps extensions and urls to typed info', () => {
   assert.equal(detectPathKind('/Users/demo/Desktop/L4.png').kind, 'image')
@@ -52,6 +52,40 @@ test('splitPathSegments returns single text for plain prose (no false positives)
   const segs = splitPathSegments('这是一个没有任何路径的普通句子。')
   assert.equal(segs.length, 1)
   assert.equal(segs[0].type, 'text')
+})
+
+test('collectDeliverables extracts reply files, excluding urls/folders/card-dupes', () => {
+  // 复刻 autofill 会话实测形态：交付物表格里的相对路径 + 裸文件名 + SHA 截断片段
+  const reply = [
+    '图已交付。',
+    '| L4 | var/diagrams/l4-approved-dfs-agent.html（规格 l4-approved-dfs-agent.dataflow.json，SHA-256 cfbc9d51…）|',
+    '| L3 | var/diagrams/l3-experience-agent.html（规格 l3-experience-agent.dataflow.json，SHA-256 7e79a92e…）|',
+    '参考 https://example.com/spec 与 var/diagrams/ 目录。',
+  ].join('\n')
+  const card = '摘要： 两张 showcase 级交互图已交付。'
+  const files = collectDeliverables(reply, card, 8)
+  assert.deepEqual(files, [
+    'var/diagrams/l4-approved-dfs-agent.html',
+    'l4-approved-dfs-agent.dataflow.json',
+    'var/diagrams/l3-experience-agent.html',
+    'l3-experience-agent.dataflow.json',
+  ])
+})
+
+test('collectDeliverables dedupes, drops card-mentioned paths, and enforces limit', () => {
+  const reply = [
+    '产物 /tmp/a.report.md 与 /tmp/b.data.json 完成。',
+    '摘要里已提过 /tmp/a.report.md 不应重复出现。',
+    '/tmp/a.report.md 第二次出现也去重。',
+  ].join('\n')
+  const card = '摘要： 见 /tmp/a.report.md。'
+  const files = collectDeliverables(reply, card, 8)
+  assert.deepEqual(files, ['/tmp/b.data.json'])
+  // 上限生效
+  const many = Array.from({ length: 12 }, (_, i) => '/tmp/out-' + i + '.png').join(' ')
+  assert.equal(collectDeliverables(many, '', 8).length, 8)
+  // URL 不入列
+  assert.deepEqual(collectDeliverables('见 https://example.com/a.pdf 页面。', '', 8), [])
 })
 
 test('resolveAbsolute resolves relative and tilde paths against cwd/home', async () => {

@@ -20,7 +20,7 @@
  */
 import React from 'react'
 import { normalizeDigestHref, normalizeDigestText } from './normalize'
-import { applyChipEnhancement } from './chips'
+import { applyChipEnhancement, buildChip, collectDeliverables } from './chips'
 import { createRoot } from 'react-dom/client'
 
 type SlotsService = {
@@ -126,6 +126,10 @@ const css = [
   '.dsh-concise-digest .dsh-concise-chip .dcc-p{color:inherit;max-width:36em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}',
   '.dsh-concise-digest .dsh-concise-chip.dcc-copied .dcc-a{color:#2E9E5B;opacity:1}',
   '.dsh-concise-digest .dsh-concise-chip.dcc-copied::after{content:"已复制 ✓";color:#2E9E5B;font-size:.85em;font-weight:700;margin-left:.2em}',
+  // v0.10.0 交付物聚合区：卡片底部虚线分隔 + 小标签 + chip 横向排布（可换行）
+  '.dsh-concise-files{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;padding-top:10px;border-top:1px dashed rgba(150,110,90,.28)}',
+  '.dsh-concise-files-label{font-size:.7em;letter-spacing:.14em;color:#B98263;font-weight:700;flex:none;user-select:none}',
+  '.dsh-concise-files .dsh-concise-chip{max-width:100%}',
   '@keyframes dcc-in{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}',
   '@media (prefers-reduced-motion:reduce){.dsh-concise-digest .dsh-concise-chip{animation:none;transition:none}}',
   '@media (prefers-reduced-motion:reduce){.dsh-concise-digest,.dsh-concise-digest::after{animation:none!important}.dsh-concise-digest::after{opacity:.9}}',
@@ -449,8 +453,52 @@ export function apply(ctx: ClientContext): void {
     const cards = new Map<Element, CardState>()
     let queued = 0
     const contentSig = (bq: Element): string => {
-      const text = bq.textContent ?? ''
+      // 克隆后剔除插件自有的交付物聚合区：聚合区文本不能计入内容签名，
+      // 否则 append 聚合区 → sig 变化 → 重置稳定窗口 → 重渲染聚合区 → 死循环
+      const clone = bq.cloneNode(true) as Element
+      clone.querySelectorAll('.dsh-concise-files').forEach((n) => n.remove())
+      const text = clone.textContent ?? ''
       return text.length + '|' + text.slice(0, 24) + '|' + text.slice(-48)
+    }
+    // v0.10.0 交付物聚合区：扫描「同一条回复」（_markdown 容器，fallback 启发式向上找）内
+    // 卡片之外的文件路径，在卡片底部列出（点击 = 既有交互：cwd 解析 + OS 默认应用打开）。
+    // 容器不可判时退化为只扫卡内（不告警不崩）；无文件不渲染（卡片外观零变化）。
+    const replyContainerOf = (bq: Element): Element | null => {
+      const md = bq.closest('[class*="_markdown"]')
+      if (md) return md
+      let el: Element | null = bq.parentElement
+      const cardLen = (bq.textContent ?? '').length
+      for (let i = 0; el && el !== document.body && i < 8; i++) {
+        const hasDeliverables = el.querySelector('table, pre, h1, h2, h3, ul, ol') !== null
+        if (hasDeliverables && (el.textContent ?? '').length > cardLen + 200) return el
+        el = el.parentElement
+      }
+      return null
+    }
+    // v0.10.1：按块级元素边界分隔提取文本——直接 textContent 会把表格相邻单元格的文字
+    // 与路径粘连成假路径（实测表头词 + 路径粘成 DFSdataflowvar/diagrams/...）。
+    const blockAwareText = (root: Element): string => {
+      const BLOCK = 'td,th,li,p,h1,h2,h3,h4,h5,h6,pre,blockquote'
+      const leaves = Array.from(root.querySelectorAll(BLOCK)).filter((b) => !b.querySelector(BLOCK))
+      return leaves.map((b) => (b.textContent ?? '')).join('\n') + '\n'
+    }
+    const renderDeliverables = (bq: HTMLElement): void => {
+      bq.querySelectorAll(':scope > .dsh-concise-files').forEach((n) => n.remove())
+      const container = replyContainerOf(bq)
+      const files = collectDeliverables(
+        container ? blockAwareText(container) : (bq.textContent ?? ''),
+        bq.textContent ?? '',
+        8,
+      )
+      if (files.length === 0) return
+      const zone = document.createElement('div')
+      zone.className = 'dsh-concise-files'
+      const label = document.createElement('span')
+      label.className = 'dsh-concise-files-label'
+      label.textContent = '交付物 · FILES'
+      zone.appendChild(label)
+      for (const f of files) zone.appendChild(buildChip(f, false))
+      bq.appendChild(zone)
     }
     const enhanceCard = (bq: Element): void => {
       // v0.8.2：宿主 linkify 会把紧贴 URL 的粗体标记与中文句读吞进 href（实测 …/xxx**%E3%80%82），
@@ -465,6 +513,8 @@ export function apply(ctx: ClientContext): void {
       }
       // v0.8.5：卡内路径 chip 化（网页跳转 / 本地文件点击复制，类型图标 + 协调动效）
       applyChipEnhancement(bq)
+      // v0.10.0：交付物聚合区（卡片底部；bq 来自 querySelectorAll 必为 HTMLElement 场景）
+      if (bq instanceof HTMLElement) renderDeliverables(bq)
     }
     const scan = (): void => {
       queued = 0

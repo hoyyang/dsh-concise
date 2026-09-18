@@ -77,6 +77,17 @@ test('registers style + reminder sections with per-session gating', async () => 
   assert.match(reminder, /SELF-CHECK/)
   assert.match(reminder, /NEVER carries to the final reply/)
   assert.match(reminder, /Task-completion reports and long explanations/)
+  // 0.10.0：拍板提问型回复点名（最常漏摘要的场景）
+  assert.match(style, /ask_user_question/)
+  assert.match(reminder, /ask_user_question/)
+  // 0.10.0：上一条回复缺摘要 → style 最开头插首屏警告
+  const missCtx = { agent: { session: { id: 's1', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '## 全部完成' }] }] } } }
+  const styleMiss = sections[0].text(missCtx)
+  assert.ok(styleMiss.startsWith('⚠️ COMPLIANCE ALERT'), 'banner prepended to style on miss')
+  assert.ok(styleMiss.indexOf('COMPLIANCE ALERT') < styleMiss.indexOf('lead with the result'), 'banner before style body')
+  // 干净回复 → 无 banner
+  const cleanCtx = { agent: { session: { id: 's1', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '> **摘要：** ok' }] }] } } }
+  assert.doesNotMatch(sections[0].text(cleanCtx), /COMPLIANCE ALERT/)
 })
 
 test('LRU evicts redundant-default entries first, preserves explicit user intent', async () => {
