@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.1] - 2026-09-18
+
+### Fixed
+- 用户实测（job 自查会话摘要卡）：正文里的「A~E」波浪号代称被误判为路径并渲染成文件夹 chip，
+  且点击无动作。根因：路径识别的 tilde 分支只要求「~」不要求「~/」，单个 ~ 前缀的散文文本即命中。
+  修复 = tilde 分支强制「~/」；新增两条回归用例（A~E 文案零 chip / 真 ~/.zshrc 仍 chip）。
+- 真文件夹 chip 点击验证通过：POST /dsh-concise/api/open → 200 → Finder 打开目标目录
+  （绝对路径场景；相对路径依赖会话 cwd 缓存——该会话发过消息即有）。
+
 ## [0.9.0] - 2026-09-18
 
 ### Changed

@@ -63,7 +63,7 @@ export interface PathSegment {
 export function splitPathSegments(text: string): PathSegment[] {
   const PATTERN = new RegExp(
     '(https?:\\/\\/[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]+' +
-    '|(?:~|/(?:Users|home|tmp|var|opt|etc|private|data|System))[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]*' +
+    '|(?:(?:~/)|(?:/(?:Users|home|tmp|var|opt|etc|private|data|System)))[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]*' +
     '|[A-Za-z0-9_\\-./]+\\.(?:png|jpe?g|gif|webp|svg|bmp|ico|pdf|docx?|rtf|xlsx?|csv|java|kt|tsx?|jsx?|py|go|rs|c|cpp|h|hpp|sh|bash|sql|swift|markdown|md|txt|json|ya?ml|xml|html?|css|zip|tar|gz|rar|7z))',
     'g',
   )

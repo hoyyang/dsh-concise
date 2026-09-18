@@ -74,3 +74,19 @@ test('isPreviewableKind marks browser-renderable kinds', async () => {
   assert.equal(isPreviewableKind('excel'), false)
   assert.equal(isPreviewableKind('archive'), false)
 })
+
+test('splitPathSegments never chips prose tildes like ~E or A~E (v0.9.1 regression)', async () => {
+  const { splitPathSegments } = await import('../src/client/chips.ts')
+  const segs = splitPathSegments('五组证据（A~E 📁，全部带文件：行号或 bugreport 日志）')
+  const chips = segs.filter((x) => x.type !== 'text')
+  assert.equal(chips.length, 0)
+})
+
+test('splitPathSegments still chips real tilde paths ~/x', async () => {
+  const { splitPathSegments } = await import('../src/client/chips.ts')
+  const segs = splitPathSegments('配置在 ~/.zshrc 里')
+  const chips = segs.filter((x) => x.type !== 'text')
+  assert.equal(chips.length, 1)
+  assert.equal(chips[0].value, '~/.zshrc')
+})
+
