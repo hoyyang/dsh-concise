@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.8] - 2026-09-18
+
+### Fixed
+- 用户实测：图片 chip 点击用 Cursor 打开（弹浏览器协议确认框且应用不匹配）、md chip 仍只复制。
+- **交互重做为浏览器原生预览**：发现宿主认证文件服务 GET /api/file?path=<abs>（任意本地路径、
+  MIME 自动判定、连接服务认证后无路径限制，dsh-api-session-controller media-references 模块）——
+  浏览器可渲染类型（图片/PDF/代码/Markdown/文本）点击直接新 tab 打开文件内容：图片原生显示、
+  PDF 内置阅读器、文本纯文本展示——零弹窗、真打开文件内容。
+- 移除 IDE 协议（cursor:// 等）——浏览器对外部协议必弹确认框（多此一举且应用不匹配文件类型）。
+- word/excel/zip 等浏览器不可渲染类型 + 打开失败：降级复制路径（徽标「已复制 ✓」）；
+  文件夹仍走宿主 open-in-app 真开目录。
+- 相对路径经 /dsh-concise/api/cwd 解析（0.8.7 引入）。
+
+### Verified
+- 真机 fetch 实测：/api/file 对桌面 png 返回 200 + image/png + 819119 字节；对 README.md 返回
+  200 + text/markdown。host 5/5 + chips 7/7（isPreviewableKind 契约）。
+
 ## [0.8.7] - 2026-09-17
 
 ### Fixed

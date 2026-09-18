@@ -186,25 +186,24 @@ function buildChip(value: string, isUrl: boolean): Element {
     el.addEventListener('click', (ev) => {
       ev.stopPropagation()
       void (async () => {
-        // cwd 由 host 在 assemble 时缓存（GET /dsh-concise/api/cwd），用于相对路径 → 绝对路径
-        let cwd = ''; let home = ''
+        // cwd 由 host 在 assemble 时缓存（GET /dsh-concise/api/cwd）—— 相对路径 → 绝对路径
+        let cwd = '';
         try {
           const res = await fetch('/dsh-concise/api/cwd')
           if (res.ok) {
             const j = (await res.json()) as { cwd?: string }
-            if (typeof j.cwd === 'string') { cwd = j.cwd; home = cwd.split('/').slice(0, 3).join('/') }
+            if (typeof j.cwd === 'string') cwd = j.cwd
           }
-        } catch { /* cwd 不可得时按原样尝试 */ }
-        const abs = resolveAbsolute(path, cwd, home)
-        const apps = await probeApps()
+        } catch { /* cwd 不可得 */ }
+        const abs = resolveAbsolute(path, cwd, "")
         const info = detectPathKind(path)
-        const ideFit = info.kind === 'code' || info.kind === 'markdown' || info.kind === 'image' || info.kind === 'file'
-        const scheme = ideFit ? ideSchemeUrl(apps, abs) : null
-        if (scheme) {
-          window.open(scheme, '_blank')
+        // 浏览器可渲染：新窗预览（图片直接显示、PDF 内置阅读器、文本按纯文本）—— 零弹窗真打开文件内容
+        if (isPreviewableKind(info.kind) && info.kind !== 'file') {
+          window.open('/api/file?path=' + encodeURIComponent(abs), '_blank')
           mark(el as HTMLElement, 'dcc-opened')
           return
         }
+        // 文件夹：宿主 open-in-app 真开目录；其余二进制类型（word/excel/zip 等）浏览器无法渲染 → 复制路径降级
         const opened = await openViaHost(abs)
         if (opened) { mark(el as HTMLElement, 'dcc-opened'); return }
         try { await navigator.clipboard?.writeText(path) } catch { /* 降级 */ }
@@ -276,9 +275,8 @@ export function resolveAbsolute(path: string, cwd: string, home: string): string
   return cwd ? cwd.replace(/\/?$/, '/') + path : path
 }
 
-/** IDE 协议 URL：按探测优先级返回第一个可用协议，无则 null。 */
-export function ideSchemeUrl(apps: string[], absPath: string): string | null {
-    const order = ['cursor', 'vscode', 'windsurf', 'zed']
-    const ide = order.find((id) => apps.includes(id))
-    return ide ? ide + '://file' + absPath : null
+
+/** 浏览器可直接渲染的类型：走 /api/file 新窗预览；其余降级复制。 */
+export function isPreviewableKind(kind: string): boolean {
+  return ['image', 'pdf', 'code', 'markdown', 'file'].includes(kind)
 }
