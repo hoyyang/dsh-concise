@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.9] - 2026-09-18
+
+### Changed
+- 文件 chip 交互升级为**双通道**（用户实测 0.8.8 反馈：IDE 协议弹确认框、图片应用不匹配）：
+  ① **单击 = 浏览器原生预览**（/api/file 认证文件服务）：图片直接显示、PDF 内置阅读器、
+     代码/Markdown 文本展示——零弹窗，即浏览器中「打开文件」的默认方式；
+  ② **Shift+单击 = 系统编辑器打开文件本体**（cursor/vscode/windsurf/zed 协议按探测优先）：
+     首次使用浏览器会请求一次确认，勾选「始终允许 http://127.0.0.1:3080…」后永久静默；
+  ③ URL 依旧直接跳转（http 跳转本无弹窗）；文件夹依旧 Finder 真开目录；
+     word/excel/zip 等浏览器不可渲染类型：复制路径降级（明示）。
+- 划选复制不受影响（chip click 的 stopPropagation 仅作用于自身 click 事件）。
+
+### Verified
+- 真机：URL chip 点击新 tab 跳转；预览/编辑双通道逻辑与 cwd 解析（/dsh-concise/api/cwd）
+  spy 实测通过。host 5/5 + chips 7/7 + normalize 4/4 + typecheck/build/热重载绿。
+
 ## [0.8.8] - 2026-09-18
 
 ### Fixed

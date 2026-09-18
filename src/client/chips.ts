@@ -182,8 +182,8 @@ function buildChip(value: string, isUrl: boolean): Element {
     })
   } else {
     const path = value
-    el.title = info.label + ' · 点击用系统应用打开'
-    el.addEventListener('click', (ev) => {
+    el.title = info.label + ' · 点击预览 · Shift+点击用编辑器打开'
+    el.addEventListener('click', (ev: Event) => { const me = ev as MouseEvent;
       ev.stopPropagation()
       void (async () => {
         // cwd 由 host 在 assemble 时缓存（GET /dsh-concise/api/cwd）—— 相对路径 → 绝对路径
@@ -195,15 +195,25 @@ function buildChip(value: string, isUrl: boolean): Element {
             if (typeof j.cwd === 'string') cwd = j.cwd
           }
         } catch { /* cwd 不可得 */ }
-        const abs = resolveAbsolute(path, cwd, "")
+        const abs = resolveAbsolute(path, cwd, '')
         const info = detectPathKind(path)
-        // 浏览器可渲染：新窗预览（图片直接显示、PDF 内置阅读器、文本按纯文本）—— 零弹窗真打开文件内容
+        // Shift+点击 = 用系统编辑器打开（IDE 协议；首次浏览器会请求确认，勾选「始终允许」后静默）
+        if (me.shiftKey) {
+          const apps = await probeApps()
+          const scheme = ideSchemeUrl(apps, abs)
+          if (scheme) {
+            window.open(scheme, '_blank')
+            mark(el as HTMLElement, 'dcc-opened')
+            return
+          }
+        }
+        // 默认：浏览器可渲染类型新窗预览（图片直接显示、PDF 内置阅读器、文本按纯文本）——零弹窗
         if (isPreviewableKind(info.kind) && info.kind !== 'file') {
           window.open('/api/file?path=' + encodeURIComponent(abs), '_blank')
           mark(el as HTMLElement, 'dcc-opened')
           return
         }
-        // 文件夹：宿主 open-in-app 真开目录；其余二进制类型（word/excel/zip 等）浏览器无法渲染 → 复制路径降级
+        // 文件夹：宿主 open-in-app 真开目录；其余二进制类型（word/excel/zip 等）：复制路径降级
         const opened = await openViaHost(abs)
         if (opened) { mark(el as HTMLElement, 'dcc-opened'); return }
         try { await navigator.clipboard?.writeText(path) } catch { /* 降级 */ }
@@ -277,6 +287,13 @@ export function resolveAbsolute(path: string, cwd: string, home: string): string
 
 
 /** 浏览器可直接渲染的类型：走 /api/file 新窗预览；其余降级复制。 */
+/** IDE 协议 URL：按探测优先级返回第一个可用协议，无则 null。 */
+export function ideSchemeUrl(apps: string[], absPath: string): string | null {
+    const order = ['cursor', 'vscode', 'windsurf', 'zed']
+    const ide = order.find((id) => apps.includes(id))
+    return ide ? ide + '://file' + absPath : null
+}
+
 export function isPreviewableKind(kind: string): boolean {
   return ['image', 'pdf', 'code', 'markdown', 'file'].includes(kind)
 }
