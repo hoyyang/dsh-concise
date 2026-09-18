@@ -220,7 +220,8 @@ export function buildChip(value: string, isUrl: boolean): Element {
         // 无副作用，可安全连续尝试；全败降级复制原始路径。
         let candidates: string[] = []
         try {
-          const res = await fetch('/dsh-concise/api/cwd')
+          const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
+          const res = await fetch('/dsh-concise/api/cwd?sessionId=' + encodeURIComponent(sid))
           if (res.ok) {
             const j = (await res.json()) as { cwd?: string; candidates?: unknown }
             const list = Array.isArray(j.candidates) ? j.candidates : []

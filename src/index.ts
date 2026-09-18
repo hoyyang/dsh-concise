@@ -14,7 +14,7 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 
 /** Cordis plugin name. */
@@ -276,7 +276,15 @@ function parseCwdFromSessionFile(file: string, decompress: (b: Buffer) => Buffer
 }
 
 /** 无缓存可用的会话（如插件重装后查看历史消息）：按 mtime 取最近 count 个会话转写解出 cwd 候选。 */
-async function recentSessionCwds(count: number): Promise<string[]> {
+let recentSessionCwdsCache: { at: number; cwds: string[] } | null = null
+/** 60s TTL：recentSessionCwds 需解压转写（数 MB），verify/cwd 高频调用不得反复解。 */
+async function recentSessionCwdsCached(count: number): Promise<string[]> {
+  if (recentSessionCwdsCache && Date.now() - recentSessionCwdsCache.at < 60_000) return recentSessionCwdsCache.cwds
+  const cwds = await recentSessionCwdsUncached(count)
+  recentSessionCwdsCache = { at: Date.now(), cwds }
+  return cwds
+}
+async function recentSessionCwdsUncached(count: number): Promise<string[]> {
   try {
     const decompress = await zstdFn()
     if (!decompress) return []
@@ -301,6 +309,43 @@ async function recentSessionCwds(count: number): Promise<string[]> {
     return out
   } catch { return [] }
 }
+
+const WALK_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache'])
+/** cwd 直下不存在时按 basename 递归查找（深度 4、条目预算 4000、跳依赖/构建目录）。 */
+function findInDir(dir: string, base: string, budget: { n: number }, depth: number): boolean {
+  if (depth > 4 || budget.n <= 0) return false
+  let entries: string[] = []
+  try { entries = readdirSync(dir) } catch { return false }
+  for (const name of entries) {
+    if (budget.n <= 0) return false
+    budget.n -= 1
+    const full = join(dir, name)
+    let isDir = false
+    try { isDir = statSync(full).isDirectory() } catch { continue }
+    if (!isDir && name === base) return true
+    if (isDir && !WALK_SKIP_DIRS.has(name) && !name.startsWith('.')) {
+      if (findInDir(full, base, budget, depth + 1)) return true
+    }
+  }
+  return false
+}
+
+/** 相对路径先按 cwd 直解，找不到再按 basename 递归；绝对/波浪线路径直接 existsSync。 */
+async function pathExistsAnywhere(candidates: Set<string>, p: string): Promise<boolean> {
+  if (p.startsWith('/')) return existsSync(p)
+  if (p.startsWith('~')) return existsSync(join(homedir(), p.slice(1)))
+  const base = basename(p)
+  for (const c of candidates) {
+    const direct = c.replace(/\/?$/, '/') + p
+    if (existsSync(direct)) return true
+  }
+  for (const c of candidates) {
+    if (findInDir(c, base, { n: 4000 }, 0)) return true
+  }
+  return false
+}
+
+
 
 function sessionIdLooksSafe(sessionId: string): boolean {
   return /^session-[A-Za-z0-9-]{1,120}$/.test(sessionId)
@@ -481,6 +526,56 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
           }
           return
         }
+        // v0.10.1：交付物存在性校验（正文示例里的假路径不进聚合区）。只读 existsSync，不 spawn。
+        if (path === '/verify-paths' && method === 'POST') {
+          const origin = String(req.headers?.origin ?? '')
+          const hostHeader = String(req.headers?.host ?? '')
+          if (origin && !origin.includes(hostHeader)) {
+            res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'cross-origin verify is not allowed' }))
+            return
+          }
+          const body = await readJsonBody(req)
+          const raw = Array.isArray(body.paths) ? body.paths : []
+          if (raw.length > 32) {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'paths must contain at most 32 entries' }))
+            return
+          }
+          const paths = raw.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 1024)
+          const sid = sidFrom({})
+          // v0.10.1：带 sessionId 的请求做精确磁盘兜底（转写首行 cwd）并回填缓存
+          if (sid && !cwdBySession.has(sid) && /^session-[A-Za-z0-9-]{1,120}$/.test(sid)) {
+            const decompress = await zstdFn()
+            if (decompress) {
+              const base = process.env.DSH_HOME || join(homedir(), '.dsh')
+              for (const grp of (() => { try { return readdirSync(join(base, 'sessions')) } catch { return [] as string[] } })()) {
+                const f = join(base, 'sessions', grp, sid, 'session.v3.jsonl.zstd')
+                if (existsSync(f)) {
+                  const found = parseCwdFromSessionFile(f, decompress)
+                  if (found) cwdBySession.set(sid, found)
+                  break
+                }
+              }
+            }
+          }
+
+          const candidates = new Set<string>()
+          for (const v of cwdBySession.values()) if (v) candidates.add(v)
+          if (lastKnownCwd) candidates.add(lastKnownCwd)
+          for (const d of await recentSessionCwdsCached(8)) candidates.add(d)
+          candidates.add(process.cwd())
+          const existing: string[] = []
+          const seen = new Set<string>()
+          for (const p of paths) {
+            if (seen.has(p)) continue
+            seen.add(p)
+            if (await pathExistsAnywhere(candidates, p)) existing.push(p)
+          }
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ existing, debug: { sid: sid ?? null, candidates: Array.from(candidates), cwdBySession: Object.fromEntries(cwdBySession) } }))
+          return
+        }
         if ((path === '/cwd' || path.startsWith('/cwd?')) && method === 'GET') {
           const sid = sidFrom({})
           // v0.10.0：历史会话内存缓存可能为空（重装后未组装）——磁盘兜底 + 候选列表供 client 依次尝试
@@ -502,7 +597,7 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
           const candidates = new Set<string>()
           for (const v of cwdBySession.values()) if (v) candidates.add(v)
           if (lastKnownCwd) candidates.add(lastKnownCwd)
-          if (cwdBySession.size === 0) for (const d of await recentSessionCwds(3)) candidates.add(d)
+          for (const d of await recentSessionCwdsCached(8)) candidates.add(d)
           candidates.add(cwd)
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify({ cwd: cwd || null, candidates: Array.from(candidates) }))

@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.1] - 2026-09-18
+
+### Fixed
+- **交付物聚合区误报假文件（用户实测：列出的 4 个文件全部不存在、点击只能复制）**：启发式扫描无法区分交付产物与正文示例（实测 Mermaid CLI 用法 `mmdc -i x.mmd -o x.png` 的参数被当成交付物）。修复 = 存在性过滤：新增 POST /api/verify-paths（只读 existsSync，Origin 同源校验，<=32 条；相对路径按 cwd 直解 + 按 basename 递归查找（深度 4 / 条目预算 4000 / 每候选独立预算 / 跳 node_modules/.git/dist/build/.cache））；client 渲染聚合区前先校验，不存在的直接不列，全部不存在则不渲染聚合区；verify 不可用时降级保留启发式结果。回归测试：verify 端点用例（假路径过滤 / 绝对+相对存在 / 去重 / 超量 400）。
+- **cwd 解析缺口**：历史会话内存缓存为空（插件重装后未组装）导致相对路径点击降级复制。修复 = client 把 slot 注入的会话 id 广播到 globalThis 并随 cwd/verify 请求携带；host 按 sessionId 做磁盘兜底（node:zlib 解会话转写首行 cwd，>8MB 跳过）并回填缓存；cwd 端点返回候选列表供点击依次尝试。真机验证：点击聚合区 chip dcc-opened（OS 默认应用打开）。
+- **聚合区启动竞态**：digest 渲染早于会话 id 广播时 verify 拿空 sid 被滤空且页面静止不再重试 - 渲染失败时延迟 2s 重试，最多 2 次。
+- recentSessionCwds 加 60s TTL 缓存（需解压数 MB 转写，verify/cwd 高频调用不得反复解）。
+
 ## [0.10.0] - 2026-09-18
 
 ### Added

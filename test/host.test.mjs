@@ -6,8 +6,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 function makeEnv() {
   process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-concise-test-'))
@@ -121,6 +121,24 @@ test('legacy 说人话 digest prefix is accepted by client matcher regex', async
   assert.ok(MARK_RE.test('说人话： 老会话输出'))
   assert.ok(!MARK_RE.test('普通引用： 不打卡片'))
   assert.ok(!MARK_RE.test('摘要'))
+})
+
+test('verify-paths filters nonexistent example paths, keeps real ones (v0.10.1)', async () => {
+  makeEnv()
+  const { ctx, api } = mockCtx()
+  const { apply } = await import('../lib/index.js')
+  apply(ctx)
+  await callApi(api(), 'POST', '/toggle', {})
+  const stateAbs = join(process.env.DSH_HOME, 'dsh-concise', 'state.json')
+  const r = await callApi(api(), 'POST', '/verify-paths', {
+    paths: [stateAbs, 'no-such-example-xyz.png', 'package.json', 'package.json', 'x.png'],
+  })
+  assert.equal(r.status, 200)
+  // stateAbs = 绝对路径存在；package.json = 相对 cwd（测试进程）存在；其余（示例假路径）过滤
+  assert.deepEqual(r.payload.existing, [stateAbs, 'package.json'])
+  // 超量拒绝（fail loud）
+  const tooMany = await callApi(api(), 'POST', '/verify-paths', { paths: Array.from({ length: 33 }, (_, i) => 'f' + i + '.txt') })
+  assert.equal(tooMany.status, 400)
 })
 
 test('isDigestMissing: detects missing/clean/fresh/unjudgeable session shapes', async () => {

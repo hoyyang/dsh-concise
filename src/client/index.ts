@@ -224,6 +224,9 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
 
   React.useEffect(() => {
     let disposed = false
+    // v0.10.1：把当前会话 id 广播到 globalThis——digest 卡渲染（全局 scan，不经 slot inject）
+    // 发 cwd/verify 请求时带上，host 才能精确定位该会话的 cwd
+    ;(globalThis as { __dshConciseSid?: string }).__dshConciseSid = sessionId ?? ''
     void fetchState(sessionId).then((value) => {
       if (!disposed && value !== null) setEnabled(value)
     })
@@ -482,15 +485,35 @@ export function apply(ctx: ClientContext): void {
       const leaves = Array.from(root.querySelectorAll(BLOCK)).filter((b) => !b.querySelector(BLOCK))
       return leaves.map((b) => (b.textContent ?? '')).join('\n') + '\n'
     }
-    const renderDeliverables = (bq: HTMLElement): void => {
+    const renderDeliverables = async (bq: HTMLElement): Promise<boolean> => {
       bq.querySelectorAll(':scope > .dsh-concise-files').forEach((n) => n.remove())
+      // 防重入：verify 请求期间可能有新 mutation 触发补挂
+      if (bq.dataset.dcfBusy === '1') return true
+      bq.dataset.dcfBusy = '1'
+      try {
       const container = replyContainerOf(bq)
-      const files = collectDeliverables(
+      let files = collectDeliverables(
         container ? blockAwareText(container) : (bq.textContent ?? ''),
         bq.textContent ?? '',
         8,
       )
-      if (files.length === 0) return
+      // v0.10.1：存在性过滤——正文示例里的假路径（实测 mmdc -o x.png 被当成交付物）不列；
+      // verify 不可用时降级保留启发式结果（与旧行为一致）
+      if (files.length > 0) {
+        try {
+          const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
+          const res = await fetch('/dsh-concise/api/verify-paths?sessionId=' + encodeURIComponent(sid), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paths: files }),
+          })
+          if (res.ok) {
+            const j = await res.json() as { existing?: unknown }
+            if (Array.isArray(j.existing)) files = j.existing.filter((x): x is string => typeof x === 'string')
+          }
+        } catch { /* degrade */ }
+      }
+      if (files.length === 0) return false
       const zone = document.createElement('div')
       zone.className = 'dsh-concise-files'
       const label = document.createElement('span')
@@ -499,6 +522,10 @@ export function apply(ctx: ClientContext): void {
       zone.appendChild(label)
       for (const f of files) zone.appendChild(buildChip(f, false))
       bq.appendChild(zone)
+      return true
+      } finally {
+        delete bq.dataset.dcfBusy
+      }
     }
     const enhanceCard = (bq: Element): void => {
       // v0.8.2：宿主 linkify 会把紧贴 URL 的粗体标记与中文句读吞进 href（实测 …/xxx**%E3%80%82），
@@ -514,7 +541,7 @@ export function apply(ctx: ClientContext): void {
       // v0.8.5：卡内路径 chip 化（网页跳转 / 本地文件点击复制，类型图标 + 协调动效）
       applyChipEnhancement(bq)
       // v0.10.0：交付物聚合区（卡片底部；bq 来自 querySelectorAll 必为 HTMLElement 场景）
-      if (bq instanceof HTMLElement) renderDeliverables(bq)
+      if (bq instanceof HTMLElement) void renderDeliverables(bq)
     }
     const scan = (): void => {
       queued = 0
@@ -536,7 +563,16 @@ export function apply(ctx: ClientContext): void {
             state.timer = undefined
             if (!card.isConnected) { cards.delete(card); return }
             enhanceCard(card)
-            state.enhanced = true
+            // v0.10.1：聚合区未渲染（如启动竞态 sid 未就绪被过滤空）→ 延迟重试，最多 2 次
+            const attempt = (left: number): void => {
+              void renderDeliverables(card).then((rendered) => {
+                state.enhanced = rendered
+                if (!rendered && left > 0 && card.isConnected) {
+                  window.setTimeout(() => { if (card.isConnected) attempt(left - 1) }, 2000)
+                }
+              })
+            }
+            attempt(2)
           }, STABLE_MS)
         } else if (st.enhanced && st.timer === undefined && bq.querySelector('.dsh-concise-chip') === null) {
           // 内容未变但 chip 不在了（宿主重渲染覆盖了插件 DOM）：稳定内容直接补挂（幂等）
