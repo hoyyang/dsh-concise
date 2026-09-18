@@ -13,7 +13,7 @@ test('detectPathKind maps extensions and urls to typed info', () => {
   assert.equal(detectPathKind('/Users/demo/数据.xlsx').kind, 'excel')
   assert.equal(detectPathKind('src/main/App.java').kind, 'code')
   assert.equal(detectPathKind('README.md').kind, 'markdown')
-  assert.equal(detectPathKind('https://feishu.cn/wiki/abc').kind, 'link')
+  assert.equal(detectPathKind('https://example.com/wiki/abc').kind, 'link')
   assert.equal(detectPathKind('http://example.com').kind, 'link')
   // 无扩展名的绝对路径 → 文件夹；未知扩展名 → 文件
   assert.equal(detectPathKind('/Users/demo/Desktop/DSH').kind, 'folder')
@@ -29,14 +29,14 @@ test('detectPathKind carries per-type color and label', () => {
 })
 
 test('splitPathSegments splits mixed digest text into typed segments', () => {
-  const text = '已复制到 /Users/demo/Desktop/L4.png 与 https://feishu.cn/wiki/abc，详见 src/app.java 的实现。'
+  const text = '已复制到 /Users/demo/Desktop/L4.png 与 https://example.com/wiki/abc，详见 src/app.java 的实现。'
   const segs = splitPathSegments(text)
   const kinds = segs.map((s) => s.type)
   assert.deepEqual(kinds, ['text', 'file', 'text', 'url', 'text', 'file', 'text'])
   const file1 = segs[1]
   assert.equal(file1.value, '/Users/demo/Desktop/L4.png')
   const url = segs[3]
-  assert.equal(url.value, 'https://feishu.cn/wiki/abc')
+  assert.equal(url.value, 'https://example.com/wiki/abc')
   // 中文逗号不被吞进路径
   assert.ok(segs[2].value.startsWith(' 与 '))
 })

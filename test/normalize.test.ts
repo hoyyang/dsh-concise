@@ -5,8 +5,8 @@ import { normalizeDigestHref, normalizeDigestText } from '../src/client/normaliz
 test('normalizeDigestHref strips trailing bold markers and pct-encoded CJK punctuation', () => {
   // 实证坏链形态（job 自查会话）
   assert.equal(
-    normalizeDigestHref('https://feishu.cn/wiki/REDACTEDTOKEN**%E3%80%82'),
-    'https://feishu.cn/wiki/REDACTEDTOKEN',
+    normalizeDigestHref('https://example.com/wiki/REDACTEDTOKEN**%E3%80%82'),
+    'https://example.com/wiki/REDACTEDTOKEN',
   )
   // 字面星号与字面句读混合
   assert.equal(normalizeDigestHref('https://a.com/x**。'), 'https://a.com/x')
@@ -15,7 +15,7 @@ test('normalizeDigestHref strips trailing bold markers and pct-encoded CJK punct
 })
 
 test('normalizeDigestHref keeps clean URLs untouched (no-op on standard links)', () => {
-  assert.equal(normalizeDigestHref('https://feishu.cn/wiki/abc'), 'https://feishu.cn/wiki/abc')
+  assert.equal(normalizeDigestHref('https://example.com/wiki/abc'), 'https://example.com/wiki/abc')
   // 中间（非尾部）的星号/括号合法保留
   assert.equal(normalizeDigestHref('https://a.com/a*b(c).html'), 'https://a.com/a*b(c).html')
   assert.equal(normalizeDigestHref('https://a.com/search?q=x*y'), 'https://a.com/search?q=x*y')
