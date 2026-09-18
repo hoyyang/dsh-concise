@@ -1,5 +1,6 @@
 [
   { "id": "S5-个人路径", "match": "/Users/demo" },
   { "id": "S4-内链", "match": "feishu.cn" },
-  { "id": "G1-历史作者", "match": "hoyyang@users.noreply.github.com", "reason": "公开 handle 的 noreply 形态 git 身份；2026-09-17 全仓脱敏时用户明示固化的公开身份（仓库级 config 已固化），非真实邮箱泄露" }
+  { "id": "G1-历史作者", "match": "hoyyang <hoyyang@users.noreply.github.com>", "reason": "公开 handle 完整形态 git 身份；2026-09-17 全仓脱敏时用户明示固化的公开身份（仓库级 config 已固化）" },
+  { "id": "S1-邮箱", "match": "hoyyang@users.noreply.github.com", "reason": "同上：公开 handle 的 noreply 形态，非真实邮箱泄露" }
 ]
