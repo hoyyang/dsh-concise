@@ -65,10 +65,14 @@ export function splitPathSegments(text: string): PathSegment[] {
   // 正则交替先到先得导致 .html→.h、.json→.js、.docx→.doc、.xlsx→.xls、.cpp/.css/.csv→.c 截断
   //（路径残缺，点击打开必失败）。同前缀对全部改为长 extension 在前（docx|doc、xlsx|xls、tsx|ts、
   // json 在 jsx|js 前、html|htm 在 h 前、markdown 在 md 前、csv|css 在 c 前）。
+  // v0.10.3 修复：相对路径扩展名后加词尾负向前瞻（不得紧跟字母/数字/下划线）——无边界时
+  // 邮箱/域名被回溯出假扩展名：hoyyang@users.noreply.github.com 的域名尾部回退到 .c
+  //（c 是合法扩展名）→ 切出假 chip「users.noreply.github.c」+ 残段「om」；.com/.cn/.ch 类
+  // 域名同理全部误 chip。加边界后文件名后跟中文/标点/空白/串尾不受影响。
   const PATTERN = new RegExp(
     '(https?:\\/\\/[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]+' +
     '|(?:(?:~/)|(?:/(?:Users|home|tmp|var|opt|etc|private|data|System)))[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]*' +
-    '|[A-Za-z0-9_\\-./]+\\.(?:png|jpeg|jpg|gif|webp|svg|bmp|ico|pdf|docx|doc|rtf|xlsx|xls|csv|css|java|kt|tsx|ts|json|jsx|js|py|go|rs|swift|bash|sh|sql|hpp|html|htm|markdown|md|txt|ya?ml|xml|zip|tar|gz|rar|7z|cpp|c))',
+    '|[A-Za-z0-9_\\-./]+\\.(?:png|jpeg|jpg|gif|webp|svg|bmp|ico|pdf|docx|doc|rtf|xlsx|xls|csv|css|java|kt|tsx|ts|json|jsx|js|py|go|rs|swift|bash|sh|sql|hpp|html|htm|markdown|md|txt|ya?ml|xml|zip|tar|gz|rar|7z|cpp|c)(?![A-Za-z0-9_]))',
     'g',
   )
   const out: PathSegment[] = []

@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.3] - 2026-09-18
+
+### Fixed
+- **邮箱/域名被误切成假 chip（用户实测：dsh-improve-prompt 会话摘要卡把 hoyyang@users.noreply.github.com
+  切成「hoyyang@」+ 假 chip「users.noreply.github.c」+ 残段「om」）**：相对路径识别正则缺词尾边界，
+  域名尾部被回溯出合法扩展名（com 逐字符回退命中 c，c 是注册过的 .c 代码扩展名），.com/.cn/.ch 类
+  域名全家族同理误 chip。修复 = 相对路径扩展名后加负向前瞻（不得紧跟字母/数字/下划线）；文件名后跟
+  中文/标点/空白/串尾的既有行为不变，真实相对路径（src/index.ts 等）回归用例固化。已渲染的错误
+  卡片在页面刷新/会话重开后以新逻辑重建。
+
 ## [0.10.2] - 2026-09-18
 
 ### Fixed

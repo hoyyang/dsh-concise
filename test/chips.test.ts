@@ -124,3 +124,23 @@ test('splitPathSegments still chips real tilde paths ~/x', async () => {
   assert.equal(chips[0].value, '~/.zshrc')
 })
 
+test('splitPathSegments never chips emails/domains with pseudo-extensions (v0.10.3 regression)', async () => {
+  const { splitPathSegments } = await import('../src/client/chips.ts')
+  // 用户实测（dsh-improve-prompt 会话）：hoyyang@users.noreply.github.com 被切成
+  // 「hoyyang@」+ 假 chip「users.noreply.github.c」（域名尾部回溯出合法扩展名 c）+ 残段「om」
+  const segs = splitPathSegments('身份全部重写为 hoyyang@users.noreply.github.com，历史清零。')
+  assert.equal(segs.filter((x) => x.type !== 'text').length, 0, 'email must stay plain text')
+  assert.equal(segs.length, 1, 'no residual fragments')
+  // 裸域名同家族（.com/.cn/.ch → 回溯到单字母扩展名 c）一律不 chip；
+  // 邮箱用例复用白名单公开身份（门 11 S1 不新增邮箱形态）
+  assert.equal(splitPathSegments('仓库在 github.com 上托管').filter((x) => x.type !== 'text').length, 0)
+  assert.equal(splitPathSegments('联系 hoyyang@users.noreply.github.com 即可').filter((x) => x.type !== 'text').length, 0)
+})
+
+test('splitPathSegments still chips real relative paths after word-boundary fix', async () => {
+  const { splitPathSegments } = await import('../src/client/chips.ts')
+  const segs = splitPathSegments('代码在 src/index.ts，报告见 README.md。图是 draw-code/e2e-l3.png')
+  const chips = segs.filter((x) => x.type === 'file')
+  assert.deepEqual(chips.map((c) => c.value), ['src/index.ts', 'README.md', 'draw-code/e2e-l3.png'])
+})
+
