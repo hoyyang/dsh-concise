@@ -499,6 +499,7 @@ export function apply(ctx: ClientContext): void {
       )
       // v0.10.1：存在性过滤——正文示例里的假路径（实测 mmdc -o x.png 被当成交付物）不列；
       // verify 不可用时降级保留启发式结果（与旧行为一致）
+      let resolvedAbs: Record<string, string> = {}
       if (files.length > 0) {
         try {
           const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
@@ -508,8 +509,12 @@ export function apply(ctx: ClientContext): void {
             body: JSON.stringify({ paths: files }),
           })
           if (res.ok) {
-            const j = await res.json() as { existing?: unknown }
+            const j = await res.json() as { existing?: unknown; resolved?: unknown }
             if (Array.isArray(j.existing)) files = j.existing.filter((x): x is string => typeof x === 'string')
+            // v0.10.2：verify 递归解析出的绝对路径带回 chip（点击直接开，不再只靠 cwd 直连）
+            if (j.resolved && typeof j.resolved === 'object' && !Array.isArray(j.resolved)) {
+              resolvedAbs = j.resolved as Record<string, string>
+            }
           }
         } catch { /* degrade */ }
       }
@@ -520,7 +525,12 @@ export function apply(ctx: ClientContext): void {
       label.className = 'dsh-concise-files-label'
       label.textContent = '交付物 · FILES'
       zone.appendChild(label)
-      for (const f of files) zone.appendChild(buildChip(f, false))
+      for (const f of files) {
+        const chip = buildChip(f, false) as HTMLElement
+        const abs = resolvedAbs[f]
+        if (typeof abs === 'string' && abs.startsWith('/')) chip.dataset.dccAbs = abs
+        zone.appendChild(chip)
+      }
       bq.appendChild(zone)
       return true
       } finally {

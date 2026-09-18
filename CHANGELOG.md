@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.2] - 2026-09-18
+
+### Fixed
+- **交付物 chip 点击只能复制、无法打开（用户实测：draw-code/e2e-*.png 两张期望打开的图点击仅复制）**：
+  根因 = verify-paths 与点击打开的解析能力不对称——verify 按 basename 递归查找能确认文件存在
+  （chip 因此渲染），却把递归找到的绝对路径丢弃（findInDir 只回 boolean）；点击只做「cwd 候选直连
+  拼接」，相对路径真身不在任何候选直连位置（实测真身在 dsh-draw-code/draw-code/ 下，而候选 cwd
+  直连指向同名的无关目录）时全部 400 → 降级复制。修复 = ①verify-paths 响应新增 resolved 映射
+  （原始相对路径 → 递归解析出的绝对路径），client 渲染聚合区时把它随 chip 携带，点击直接开；
+  ②点击期兜底：cwd 直连全败后对该路径单发一次 verify 取 resolved 绝对路径再开（卡内相对路径
+  chip 同样受益）；open 端点仍只收已存在绝对路径，安全口径不变。回归测试：resolved 映射断言 +
+  递归解析专用用例（直连不可解 / 递归命中 / 假路径不过）。
+
 ## [0.10.1] - 2026-09-18
 
 ### Fixed

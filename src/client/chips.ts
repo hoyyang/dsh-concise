@@ -218,6 +218,21 @@ export function buildChip(value: string, isUrl: boolean): Element {
         // v0.10.0：cwd 候选依次尝试——历史会话的内存缓存可能为空（重装后未组装），
         // host 返回 candidates（内存缓存 + 最近会话转写磁盘兜底）；open 400 = 目标不存在，
         // 无副作用，可安全连续尝试；全败降级复制原始路径。
+        const tryOpen = async (abs: string): Promise<boolean> => {
+          try {
+            const res2 = await fetch('/dsh-concise/api/open', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ path: abs }),
+            })
+            return res2.ok
+          } catch { return false }
+        }
+        // v0.10.2 ①：渲染期 verify 已按 basename 递归解析出的绝对路径直接用——相对路径未必能从
+        // 任何候选 cwd 直连拼出（实测 draw-code/e2e-*.png 真身在 dsh-draw-code/draw-code/ 下，
+        // 直连永远 400 → 只能降级复制，即 0.10.1 用户实测回归）。
+        const preAbs = (el as HTMLElement).dataset.dccAbs
+        if (preAbs && await tryOpen(preAbs)) { mark(el as HTMLElement, 'dcc-opened'); return }
         let candidates: string[] = []
         try {
           const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
@@ -232,18 +247,26 @@ export function buildChip(value: string, isUrl: boolean): Element {
         if (candidates.length === 0) candidates = ['']
         for (const cwd of candidates) {
           const abs = resolveAbsolute(path, cwd, '')
-          try {
-            const res2 = await fetch('/dsh-concise/api/open', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ path: abs }),
-            })
-            if (res2.ok) {
+          if (await tryOpen(abs)) { mark(el as HTMLElement, 'dcc-opened'); return }
+        }
+        // v0.10.2 ②：点击期兜底——单路径 verify，host 按 basename 递归解析出绝对路径再开
+        // （卡内相对路径 chip 同样受益；open 仅收绝对路径，安全口径不变）
+        try {
+          const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
+          const res = await fetch('/dsh-concise/api/verify-paths?sessionId=' + encodeURIComponent(sid), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paths: [path] }),
+          })
+          if (res.ok) {
+            const j = (await res.json()) as { resolved?: Record<string, unknown> }
+            const abs = j.resolved?.[path]
+            if (typeof abs === 'string' && abs.startsWith('/') && (await tryOpen(abs))) {
               mark(el as HTMLElement, 'dcc-opened')
               return
             }
-          } catch { /* degrade */ }
-        }
+          }
+        } catch { /* degrade */ }
         try { await navigator.clipboard?.writeText(path) } catch { /* degrade */ }
         mark(el as HTMLElement, 'dcc-copied')
       })()

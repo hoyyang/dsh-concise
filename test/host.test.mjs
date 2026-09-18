@@ -136,9 +136,30 @@ test('verify-paths filters nonexistent example paths, keeps real ones (v0.10.1)'
   assert.equal(r.status, 200)
   // stateAbs = 绝对路径存在；package.json = 相对 cwd（测试进程）存在；其余（示例假路径）过滤
   assert.deepEqual(r.payload.existing, [stateAbs, 'package.json'])
+  // v0.10.2：resolved 回传解析出的绝对路径（点击打开的直接依据）
+  assert.equal(r.payload.resolved[stateAbs], stateAbs)
+  assert.equal(r.payload.resolved['package.json'], join(process.cwd(), 'package.json'))
+  assert.equal(r.payload.resolved['no-such-example-xyz.png'], undefined)
   // 超量拒绝（fail loud）
   const tooMany = await callApi(api(), 'POST', '/verify-paths', { paths: Array.from({ length: 33 }, (_, i) => 'f' + i + '.txt') })
   assert.equal(tooMany.status, 400)
+})
+
+test('verify-paths resolves recursive-only relative paths to absolute (v0.10.2 click-open fix)', async () => {
+  makeEnv()
+  const { ctx, api } = mockCtx()
+  const { apply } = await import('../lib/index.js')
+  apply(ctx)
+  // 复刻用户实测失效形态：相对路径从任何候选 cwd 直连都拼不出来，但 basename 在候选 cwd 树下
+  // 真实存在（test/host.test.mjs）。0.10.1 只回 existing（chip 能渲染）而丢弃找到的路径 →
+  // 点击直连全 400 → 降级复制；0.10.2 起 resolved 回传递归解析出的绝对路径，点击即可打开。
+  const r = await callApi(api(), 'POST', '/verify-paths', {
+    paths: ['no-such-dir-xyz/host.test.mjs', 'draw-code/e2e-really-missing.png'],
+  })
+  assert.equal(r.status, 200)
+  assert.deepEqual(r.payload.existing, ['no-such-dir-xyz/host.test.mjs'])
+  assert.equal(r.payload.resolved['no-such-dir-xyz/host.test.mjs'], join(process.cwd(), 'test', 'host.test.mjs'))
+  assert.equal(r.payload.resolved['draw-code/e2e-really-missing.png'], undefined)
 })
 
 test('isDigestMissing: detects missing/clean/fresh/unjudgeable session shapes', async () => {

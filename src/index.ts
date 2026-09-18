@@ -311,38 +311,48 @@ async function recentSessionCwdsUncached(count: number): Promise<string[]> {
 }
 
 const WALK_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache'])
-/** cwd 直下不存在时按 basename 递归查找（深度 4、条目预算 4000、跳依赖/构建目录）。 */
-function findInDir(dir: string, base: string, budget: { n: number }, depth: number): boolean {
-  if (depth > 4 || budget.n <= 0) return false
+/** cwd 直下不存在时按 basename 递归查找，返回找到的绝对路径（深度 4、条目预算 4000、跳依赖/构建目录）。 */
+function findInDir(dir: string, base: string, budget: { n: number }, depth: number): string | null {
+  if (depth > 4 || budget.n <= 0) return null
   let entries: string[] = []
-  try { entries = readdirSync(dir) } catch { return false }
+  try { entries = readdirSync(dir) } catch { return null }
   for (const name of entries) {
-    if (budget.n <= 0) return false
+    if (budget.n <= 0) return null
     budget.n -= 1
     const full = join(dir, name)
     let isDir = false
     try { isDir = statSync(full).isDirectory() } catch { continue }
-    if (!isDir && name === base) return true
+    if (!isDir && name === base) return full
     if (isDir && !WALK_SKIP_DIRS.has(name) && !name.startsWith('.')) {
-      if (findInDir(full, base, budget, depth + 1)) return true
+      const found = findInDir(full, base, budget, depth + 1)
+      if (found) return found
     }
   }
-  return false
+  return null
 }
 
-/** 相对路径先按 cwd 直解，找不到再按 basename 递归；绝对/波浪线路径直接 existsSync。 */
-async function pathExistsAnywhere(candidates: Set<string>, p: string): Promise<boolean> {
-  if (p.startsWith('/')) return existsSync(p)
-  if (p.startsWith('~')) return existsSync(join(homedir(), p.slice(1)))
+/**
+ * 解析出真实存在的绝对路径；找不到返回 null（v0.10.2）。
+ * 相对路径先按 cwd 直解，找不到再按 basename 递归——递归命中的绝对路径必须回传调用方：
+ * 0.10.1 只回 boolean、把找到的路径丢弃，导致「聚合区能渲染、点击只能复制」的不对称
+ * （实测 draw-code/e2e-*.png 真身在 dsh-draw-code/draw-code/ 下，任何 cwd 直连都拼不出来）。
+ */
+async function resolveExistingPath(candidates: Set<string>, p: string): Promise<string | null> {
+  if (p.startsWith('/')) return existsSync(p) ? p : null
+  if (p.startsWith('~')) {
+    const abs = join(homedir(), p.slice(1))
+    return existsSync(abs) ? abs : null
+  }
   const base = basename(p)
   for (const c of candidates) {
     const direct = c.replace(/\/?$/, '/') + p
-    if (existsSync(direct)) return true
+    if (existsSync(direct)) return direct
   }
   for (const c of candidates) {
-    if (findInDir(c, base, { n: 4000 }, 0)) return true
+    const found = findInDir(c, base, { n: 4000 }, 0)
+    if (found) return found
   }
-  return false
+  return null
 }
 
 
@@ -566,14 +576,16 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
           for (const d of await recentSessionCwdsCached(8)) candidates.add(d)
           candidates.add(process.cwd())
           const existing: string[] = []
+          const resolved: Record<string, string> = {}
           const seen = new Set<string>()
           for (const p of paths) {
             if (seen.has(p)) continue
             seen.add(p)
-            if (await pathExistsAnywhere(candidates, p)) existing.push(p)
+            const abs = await resolveExistingPath(candidates, p)
+            if (abs !== null) { existing.push(p); resolved[p] = abs }
           }
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ existing, debug: { sid: sid ?? null, candidates: Array.from(candidates), cwdBySession: Object.fromEntries(cwdBySession) } }))
+          res.end(JSON.stringify({ existing, resolved, debug: { sid: sid ?? null, candidates: Array.from(candidates), cwdBySession: Object.fromEntries(cwdBySession) } }))
           return
         }
         if ((path === '/cwd' || path.startsWith('/cwd?')) && method === 'GET') {
