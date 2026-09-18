@@ -11,7 +11,8 @@
  * 风格定义对齐 Claude Code 内置 "Concise" output style：
  * 「Claude leads with results and skips preamble and narration, while doing the work just as thoroughly.」
  */
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
@@ -154,9 +155,28 @@ function activeStyle(): { text: string; source: 'built-in' | 'custom' } {
     : { text: custom, source: 'custom' }
 }
 
+/**
+ * 用 OS 默认应用打开路径（文件或目录）：macOS open / Windows start / Linux xdg-open。
+ * spawn detached 不阻塞；失败抛出（调用方自行降级）。
+ */
+function openWithDefaultApp(path: string): void {
+  const opts = { detached: true, stdio: 'ignore' } as const
+  if (process.platform === 'darwin') spawn('open', [path], opts).unref()
+  else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', path], { ...opts, windowsVerbatimArguments: true }).unref()
+  else spawn('xdg-open', [path], opts).unref()
+}
+
+/** 校验 open 目标：绝对路径 + 存在。非法返回 null。 */
+function validateOpenTarget(path: string): string | null {
+  if (typeof path !== 'string' || path.length === 0 || path.length > 1024) return null
+  if (path.includes(' ') || !path.startsWith('/')) return null
+  return existsSync(path) ? path : null
+}
+
 interface RouteRequest {
   method?: string
   url?: string
+  headers?: Record<string, string | string[] | undefined>
   on: (event: string, fn: (chunk: unknown) => void) => void
 }
 interface RouteResponse {
@@ -393,6 +413,31 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
         const sidFrom = (body: Record<string, unknown>): string | null => {
           const sid = body.sessionId ?? url.searchParams.get('sessionId')
           return typeof sid === 'string' && sid.length > 0 && sid.length <= 512 ? sid : null
+        }
+        if (path === '/open' && method === 'POST') {
+          const origin = String(req.headers?.origin ?? '')
+          const hostHeader = String(req.headers?.host ?? '')
+          if (origin && !origin.includes(hostHeader)) {
+            res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'cross-origin open is not allowed' }))
+            return
+          }
+          const body = await readJsonBody(req)
+          const target = validateOpenTarget(typeof body.path === 'string' ? body.path : '')
+          if (!target) {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'path must be an absolute path to an existing file or directory' }))
+            return
+          }
+          try {
+            openWithDefaultApp(target)
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ ok: true, path: target }))
+          } catch (error) {
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'open failed: ' + String(error) }))
+          }
+          return
         }
         if ((path === '/cwd' || path.startsWith('/cwd?')) && method === 'GET') {
           const sid = sidFrom({})

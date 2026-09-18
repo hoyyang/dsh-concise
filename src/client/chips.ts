@@ -182,41 +182,33 @@ function buildChip(value: string, isUrl: boolean): Element {
     })
   } else {
     const path = value
-    el.title = info.label + ' · 点击预览 · Shift+点击用编辑器打开'
+    el.title = info.label + ' · 点击用系统默认应用打开'
     el.addEventListener('click', (ev: Event) => { const me = ev as MouseEvent;
       ev.stopPropagation()
       void (async () => {
-        // cwd 由 host 在 assemble 时缓存（GET /dsh-concise/api/cwd）—— 相对路径 → 绝对路径
-        let cwd = '';
+        // cwd from host assemble cache -- resolve relative to absolute
+        let cwd = ''
         try {
           const res = await fetch('/dsh-concise/api/cwd')
           if (res.ok) {
             const j = (await res.json()) as { cwd?: string }
             if (typeof j.cwd === 'string') cwd = j.cwd
           }
-        } catch { /* cwd 不可得 */ }
-        const abs = resolveAbsolute(path, cwd, '')
-        const info = detectPathKind(path)
-        // Shift+点击 = 用系统编辑器打开（IDE 协议；首次浏览器会请求确认，勾选「始终允许」后静默）
-        if (me.shiftKey) {
-          const apps = await probeApps()
-          const scheme = ideSchemeUrl(apps, abs)
-          if (scheme) {
-            window.open(scheme, '_blank')
+        } catch { /* cwd unavailable */ }
+        const abs = resolveAbsolute(path, cwd, "")
+        // v0.9.0: unified host /open -- OS default app opens file/dir
+        try {
+          const res2 = await fetch('/dsh-concise/api/open', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: abs }),
+          })
+          if (res2.ok) {
             mark(el as HTMLElement, 'dcc-opened')
             return
           }
-        }
-        // 默认：浏览器可渲染类型新窗预览（图片直接显示、PDF 内置阅读器、文本按纯文本）——零弹窗
-        if (isPreviewableKind(info.kind) && info.kind !== 'file') {
-          window.open('/api/file?path=' + encodeURIComponent(abs), '_blank')
-          mark(el as HTMLElement, 'dcc-opened')
-          return
-        }
-        // 文件夹：宿主 open-in-app 真开目录；其余二进制类型（word/excel/zip 等）：复制路径降级
-        const opened = await openViaHost(abs)
-        if (opened) { mark(el as HTMLElement, 'dcc-opened'); return }
-        try { await navigator.clipboard?.writeText(path) } catch { /* 降级 */ }
+        } catch { /* degrade */ }
+        try { await navigator.clipboard?.writeText(path) } catch { /* degrade */ }
         mark(el as HTMLElement, 'dcc-copied')
       })()
     })

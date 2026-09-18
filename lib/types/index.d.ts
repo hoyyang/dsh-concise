@@ -21,6 +21,7 @@ export declare const CONCISE_STYLE_TEXT: string;
 interface RouteRequest {
     method?: string;
     url?: string;
+    headers?: Record<string, string | string[] | undefined>;
     on: (event: string, fn: (chunk: unknown) => void) => void;
 }
 interface RouteResponse {

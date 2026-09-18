@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] - 2026-09-18
+
+### Changed
+- **文件 chip 交互统一为 OS 默认应用打开**：点击（全部类型）→ 宿主新端点
+  POST /dsh-concise/api/open { path } → spawn OS open verb（macOS open / Windows start / Linux
+  xdg-open）——与双击文件完全一致：图片→看图器、md→默认编辑器、pdf→阅读器、word→Word、目录→Finder。
+- 移除全部浏览器侧打开通道（cursor:// 等外部协议弹窗元凶清零；/api/file 预览分支随之退役；
+  ideSchemeUrl/probeApps/openViaHost/isPreviewableKind 退役）。
+- **/open 端点安全**：Origin 同源校验（跨站 403）、绝对路径 + existsSync 校验（非法 400 fail loud）、
+  spawn 失败 500；路径存在性校验防探测。
+- 相对路径经 /dsh-concise/api/cwd（会话 cwd）解析保留。
+
+### Verified
+- 端点双分支：不存在路径 400 fail-loud；真实目录 200 且 Finder 弹出。
+- 真机 GUI：png chip 点击 → POST 200 → Preview.app 打开图片。
+- host 5/5 + chips 7/7 + normalize 4/4 + typecheck/build/热重载绿。
+
 ## [0.8.9] - 2026-09-18
 
 ### Changed
