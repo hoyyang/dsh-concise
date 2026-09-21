@@ -56,9 +56,31 @@ export interface PathSegment {
   value: string
 }
 
+/** 已知扩展名交替源：相对路径分支与 trimProseTail 回锚共用同一清单（长优先顺序勿乱）。 */
+const FILE_EXT_RE_SOURCE = 'png|jpeg|jpg|gif|webp|svg|bmp|ico|pdf|docx|doc|rtf|xlsx|xls|csv|css|java|kt|tsx|ts|json|jsx|js|py|go|rs|swift|bash|sh|sql|hpp|html|htm|markdown|md|txt|ya?ml|xml|zip|tar|gz|rar|7z|cpp|c'
+
+/** CJK 字符（汉字/假名/谚文，含扩展 A）：既是文件名合法成分，也是正文粘连的来源。 */
+const CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/
+
+/** 回锚正则：最后一个「.已知扩展名」且其后不紧跟字母/数字/下划线（模块级编译一次）。 */
+const EXT_ANCHOR_RE = new RegExp('\\.(?:' + FILE_EXT_RE_SOURCE + ')(?![A-Za-z0-9_])', 'gi')
+
 /**
- * 从摘要文本中切出 URL / 本地路径片段（保守边界：排除中文句读与全角括号，
- * 与宿主 linkify 的贪婪行为相反——宁可漏识别不可错切断）。
+ * v0.10.4：正文尾段回锚。绝对路径分支的尾段字符类必须放行汉字（中文文件名合法），
+ * 代价是正文汉字无标点直接粘在路径后（如 …x.png已核验）时尾部吞进正文——把候选值
+ * 回锚到最后一个已知扩展名处，截下来的正文残段由调用方作为文本段保留（切分无损往返）。
+ * 无扩展名可锚时原样返回（无扩展名的 CJK 候选可能是真实中文目录名，不做丢弃判断）。
+ */
+export function trimProseTail(value: string): string {
+  if (!CJK_RE.test(value)) return value
+  let lastEnd = -1
+  for (const m of value.matchAll(EXT_ANCHOR_RE)) lastEnd = (m.index ?? 0) + m[0].length
+  return lastEnd >= 0 ? value.slice(0, lastEnd) : value
+}
+
+/**
+ * 从摘要文本中切出 URL / 本地路径片段（保守边界：与宿主 linkify 的贪婪行为相反——
+ * 宁可漏识别不可错切断）。
  */
 export function splitPathSegments(text: string): PathSegment[] {
   // v0.10.0 修复：扩展名交替「长优先」——旧顺序 h 在 html 前 / js 在 json 前 / doc 在 docx 前，
@@ -69,11 +91,22 @@ export function splitPathSegments(text: string): PathSegment[] {
   // 邮箱/域名被回溯出假扩展名：hoyyang@users.noreply.github.com 的域名尾部回退到 .c
   //（c 是合法扩展名）→ 切出假 chip「users.noreply.github.c」+ 残段「om」；.com/.cn/.ch 类
   // 域名同理全部误 chip。加边界后文件名后跟中文/标点/空白/串尾不受影响。
+  // v0.10.4 修复（交付物漏列产物图片，实测 AutofillService 会话）：绝对路径分支旧「负向
+  // 排除表」漏掉（）：、？！《》等全角标点——渲染后 <code> 内路径与后续中文正文在 textContent
+  // 里无界粘连（…mu9d14h5.png（已通过视觉核验：… 被整段吞进路径），detectPathKind 判为
+  // folder → collectDeliverables 把目录排除 → 交付物漏列成品图。改为「正向字符类」：字母
+  //（\p{L}，含中文文件名）+ 数字 + 路径标点（.-_ / ~ @ + 括号），任何其他标点/空白/引号/
+  // 反引号即停；URL 分支同步补齐全角标点排除。残余的无标点汉字粘连由 trimProseTail 回锚兜底。
   const PATTERN = new RegExp(
-    '(https?:\\/\\/[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]+' +
-    '|(?:(?:~/)|(?:/(?:Users|home|tmp|var|opt|etc|private|data|System)))[^\\s\uFF0C\u3002\uFF1B\uFF09\u3011\u201D\u0027\u0022<>]*' +
-    '|[A-Za-z0-9_\\-./]+\\.(?:png|jpeg|jpg|gif|webp|svg|bmp|ico|pdf|docx|doc|rtf|xlsx|xls|csv|css|java|kt|tsx|ts|json|jsx|js|py|go|rs|swift|bash|sh|sql|hpp|html|htm|markdown|md|txt|ya?ml|xml|zip|tar|gz|rar|7z|cpp|c)(?![A-Za-z0-9_]))',
-    'g',
+    '(https?:\\/\\/[^\\s\uFF0C\u3002\uFF1B\uFF1A\uFF09\uFF08\u3011\u3010\u3001\u201D\u201C\u2019\u2018\u300A\u300B\u300C\u300D\u300E\u300F\uFF1F\uFF01\u2026\u2014\u00B7\u0027\u0022<>]+' +
+    '|(?:(?:~/)|(?:/(?:Users|home|tmp|var|opt|etc|private|data|System)))[\\p{L}\\p{N}\\-._/~@+()]*' +
+    '|[A-Za-z0-9_\\-./]+\\.(?:' + FILE_EXT_RE_SOURCE + ')(?![A-Za-z0-9_])' +
+    // v0.10.6：含中文文件名的「带目录相对路径」——旧 ASCII 类在 CJK 处断裂并回切出碎片
+    //（实测 draw-code/l3-解析-agent-喂什么-做什么-出什么-l4-mu9j2r4n.html → 碎片 -l4-mu9j2r4n.html，
+    // 碎片不存在 → verify 过滤 → 交付物漏列）。要求至少一段 dir/ 目录前缀作路径信号：
+    // 纯正文（无 /）不进此分支，杜绝「见图x.png」式正文粘连；裸中文文件名仍不支持（歧义，宁可漏）。
+    '|(?:[\\p{L}\\p{N}\\-._]+\\/)+[\\p{L}\\p{N}\\-._]+\\.(?:' + FILE_EXT_RE_SOURCE + ')(?![A-Za-z0-9_]))',
+    'gu',
   )
   const out: PathSegment[] = []
   let last = 0
@@ -84,7 +117,11 @@ export function splitPathSegments(text: string): PathSegment[] {
     // 剥离尾部标点粘连（路径后紧跟的 . , 等半角标点属句子而非路径）
     const trimmed = value.replace(/[.,;:)]+$/, '')
     const trailing = value.slice(trimmed.length)
-    out.push({ type: /^https?:/i.test(trimmed) ? 'url' : 'file', value: trimmed })
+    // v0.10.4：汉字直接粘在路径尾部（无标点边界）→ 回锚到最后已知扩展名，残段保留为正文
+    const anchored = trimProseTail(trimmed)
+    const anchorTail = anchored !== trimmed ? trimmed.slice(anchored.length) : ''
+    out.push({ type: /^https?:/i.test(anchored) ? 'url' : 'file', value: anchored })
+    if (anchorTail) out.push({ type: 'text', value: anchorTail })
     if (trailing) out.push({ type: 'text', value: trailing })
     last = idx + value.length
   }

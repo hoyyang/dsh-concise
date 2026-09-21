@@ -172,12 +172,31 @@ test('isDigestMissing: detects missing/clean/fresh/unjudgeable session shapes', 
   assert.equal(isDigestMissing({ id: 'b', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '  > **摘要：** 结论在前。' }] }] }), false)
   // 多 content 块拼接后判定 → false
   assert.equal(isDigestMissing({ id: 'c', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '>' }, { type: 'text', text: ' **摘要：** ok' }] }] }), false)
-  // 首轮无 assistant 历史 → true（首轮保护）
-  assert.equal(isDigestMissing({ id: 'd', deriveMessages: () => [] }), true)
-  // 最后一条是 user（assistant 在更早）→ 只看最后一条 assistant
+  // v0.10.5：首轮无 assistant 历史 → false（无先前最终回复可判，误告警即告警疲劳源头；
+  // style 段的 MANDATORY 契约不依赖警告，全程有效）
+  assert.equal(isDigestMissing({ id: 'd', deriveMessages: () => [] }), false)
+  // 最后一条是 user（assistant 在更早）→ 只看最后一条「无 tool-call 的 assistant」
   assert.equal(isDigestMissing({ id: 'e', deriveMessages: () => [
     { role: 'assistant', content: [{ type: 'text', text: '> **摘要：** ok' }] },
     { role: 'user', content: [{ type: 'text', text: '继续' }] },
+  ] }), false)
+  // v0.10.5 工具环判别：最后一条 assistant 带 tool-call（回合中途）→ 跳过它，看更早的最终回复
+  assert.equal(isDigestMissing({ id: 'h', deriveMessages: () => [
+    { role: 'assistant', content: [{ type: 'text', text: '全部完成：交付物如下。' }] },
+    { role: 'user', content: [{ type: 'tool-result', text: 'ok' }] },
+    { role: 'assistant', content: [{ type: 'text', text: '收到，定位中' }, { type: 'tool-call', callId: 'c1' }] },
+    { role: 'user', content: [{ type: 'tool-result', text: 'ok' }] },
+  ] }), true, 'intermediate tool-call messages must not mask the previous final reply miss')
+  assert.equal(isDigestMissing({ id: 'i', deriveMessages: () => [
+    { role: 'assistant', content: [{ type: 'text', text: '> **摘要：** ok' }] },
+    { role: 'user', content: [{ type: 'tool-result', text: 'ok' }] },
+    { role: 'assistant', content: [{ type: 'tool-call', callId: 'c1' }] },
+    { role: 'user', content: [{ type: 'tool-result', text: 'ok' }] },
+  ] }), false, 'compliant final reply stays compliant across mid-turn tool loops')
+  // 纯工具环（无任何纯文本 assistant）→ false（无最终回复可判）
+  assert.equal(isDigestMissing({ id: 'j', deriveMessages: () => [
+    { role: 'assistant', content: [{ type: 'tool-call', callId: 'c1' }] },
+    { role: 'user', content: [{ type: 'tool-result', text: 'ok' }] },
   ] }), false)
   // 不可判形态：无 session / 无 deriveMessages / 抛异常 → false（不告警不阻断）
   assert.equal(isDigestMissing(undefined), false)

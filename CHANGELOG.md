@@ -3,6 +3,49 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.6] - 2026-09-20
+
+### Fixed
+- **交付物漏列中文文件名的带目录相对路径（用户实测：autofill-ai-parser-L3/L4 会话 L4 叙事卡
+  draw-code/l3-解析-agent-喂什么-做什么-出什么-l4-mu9j2r4n.html 未进交付物，同类问题第三次）**：
+  相对路径识别分支仍是纯 ASCII 字符类，在 CJK 处断裂后回切出「碎片」（-l4-mu9j2r4n.html）——
+  碎片文件不存在 → verify-paths 过滤 → 真产物与 spec 双双漏列。修复 = 新增「带目录相对路径」
+  分支（至少一段 dir/ 前缀作路径信号，目录与文件名均放行 CJK）：0.10.4 只修了绝对分支，本次
+  补齐相对分支；纯正文（无 /）不进该分支，杜绝「见图x.png」式正文粘连；裸中文文件名（无目录）
+  仍不支持——正文歧义，宁可漏不可错切。回归测试 3 组：实测会话复刻（html+json 全列）、多段目录
+  双扩展名、粘连守卫 + ASCII 行为不变。
+
+## [0.10.5] - 2026-09-20
+
+### Fixed
+- **miss 警告在 agentic 会话误告警常驻（告警疲劳），用户实测 autofill-ai-parser-L3/L4 会话最终回复
+  缺摘要卡**：isDigestMissing 把回合中途带 tool-call 的工具环消息也当「上一条最终回复」判定——
+  82K prompt 的深 agentic 会话里警告几乎每轮组装都在场且多数为误告警（上一条真实最终回复其实合规），
+  模型习惯化后连真漏卡也无视（实测：⚠️ COMPLIANCE ALERT + 尾部 WARNING 双双在场仍 0 遵循）。
+  修复 = 向前扫描跳过带 tool-call 块的 assistant 消息，只判「最后一条纯文本 assistant」= 真正的
+  最终回复；无先前最终回复（首轮/纯工具环）返回 false——style 段 MANDATORY 契约不依赖警告，
+  全程有效，误告警源铲除。
+- **技能交付模板与摘要契约冲突（本次漏卡直接诱因）**：最终回复开头是 draw-code 技能交付话术
+  （「图已生成并通过 lint。交付：…」），技能模板压过了 system prompt 契约。修复 = ①style/reminder
+  点名「技能交付模板（draw-code/archify/HTML 工坊等）同样是 user-facing final reply，模板内容
+  排在摘要块之后、不得替换或推迟」②draw-code.md 交付话术补摘要卡首行契约（对齐 0.8.0 bugfix
+  F12 先例）；同族审计：其余技能无交付模板冲突面。
+
+## [0.10.4] - 2026-09-20
+
+### Fixed
+- **交付物聚合区漏列产物图片（用户实测：「AutofillService 的解析实现」/draw-code --L0 会话摘要卡
+  交付物只列了 .l0.prompt.md，成品 PNG 缺失）**：根因 = 绝对路径识别分支用「负向排除表」定义尾段，
+  漏掉（）：、？！《》等全角标点——回复渲染后 \`<code>\` 行内代码的反引号在 textContent 中消失，
+  代码内路径与紧随的中文说明（…全景-l0-mu9d14h5.png（已通过视觉核验：…）在文本层无界粘连成
+  一段，detectPathKind 判为 folder → collectDeliverables 排除目录 → 产物图片被静默丢弃。
+  修复 = ①绝对路径尾段改「正向字符类」（字母 \p{L} 含中文文件名 + 数字 + 路径标点 .-_ / ~ @ +
+  括号），任何其他标点/空白/引号即停，粘连从根上不发生；②URL 分支同步补齐全角标点排除；
+  ③新增 trimProseTail 回锚兜底：正文汉字无标点直接粘在路径尾部（…x.png已核验）时回锚到最后
+  一个已知扩展名，截下的正文残段保留为文本段（切分无损往返）；无扩展名的 CJK 候选可能是真实
+  中文目录名，不做丢弃判断（不误伤）。回归测试 7 组：实测会话复刻（png+md 全列、表格散文零误报）、
+  全角标点家族逐字边界、回锚纯函数、无标点粘连、URL 边界、中文目录与括号文件名共存、无损往返。
+
 ## [0.10.3] - 2026-09-18
 
 ### Fixed

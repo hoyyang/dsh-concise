@@ -45,6 +45,7 @@ export const CONCISE_STYLE_TEXT = [
   '- Thoroughness of the work is unchanged: investigate, verify, and double-check exactly as you otherwise would; only the reporting is compressed.',
   '- When you made a choice, state it with a one-line reason; surface alternatives only when they are viable and materially different.',
   "- Replies that end by asking the user a question or requesting a decision (e.g. via the ask_user_question tool) are user-facing final replies too - the question panel does NOT exempt the text: they MUST still OPEN with the digest block. This is the most-skipped case in practice.",
+  '- Skill-driven delivery talk-tracks (openers like 「交付：…」「图已生成…」「报告如下」, artifact-path lists from draw-code / archify / HTML 工坊 etc.) are ALSO user-facing final replies - a skill template orders its content AFTER the digest block and never replaces or postpones it: OPEN with the digest block first, then follow the skill template. This is the second most-skipped case in practice.',
 ].join('\n')
 
 /** Prompt section 名（同层重名会冲突，带插件前缀）。 */
@@ -54,7 +55,7 @@ const SECTION_ORDER = 40
 /** 尾部提醒 section：system prompt 末尾再敲一次「最终回复必附摘要」，对冲长 prompt 下的遵循衰减。 */
 const REMINDER_SECTION_NAME = 'dsh-concise:reminder'
 const REMINDER_SECTION_ORDER = 900
-const REMINDER_TEXT = 'REMINDER (Concise output style): before ending this turn, SELF-CHECK the final user-facing text block - its first characters must be the 摘要 digest blockquote exactly as defined in the Concise output style section above. Intermediate step narration between tool calls stays exempt, but the exemption NEVER carries to the final reply: after the last tool call, restart the digest discipline. Task-completion reports and long explanations are the most common violations, and replies that end with a user-facing question/decision prompt (ask_user_question) are equally NOT exempt.'
+const REMINDER_TEXT = 'REMINDER (Concise output style): before ending this turn, SELF-CHECK the final user-facing text block - its first characters must be the 摘要 digest blockquote exactly as defined in the Concise output style section above. Intermediate step narration between tool calls stays exempt, but the exemption NEVER carries to the final reply: after the last tool call, restart the digest discipline. Task-completion reports and long explanations are the most common violations, and replies that end with a user-facing question/decision prompt (ask_user_question) or that follow a skill delivery template (「交付：…」「图已生成…」 openers from draw-code etc.) are equally NOT exempt - the skill template comes after the digest block.'
 /** v0.10.0：miss 时的首屏警告 - 插到 style section 最开头（模型最先读到的位置）。
  *  实证：仅靠尾部 reminder 追加 WARNING 在超长 system prompt（80K+ 字符）里被模型持续忽略。 */
 const DIGEST_MISS_BANNER = '⚠️ COMPLIANCE ALERT: your PREVIOUS final reply opened WITHOUT the 摘要 digest blockquote. THIS reply MUST BEGIN with "> **摘要：** ..." as its very first characters - before any heading, table, list, or body text. No exceptions.'
@@ -223,15 +224,21 @@ export function isDigestMissing(session: SessionLike | undefined | null): boolea
   if (!session || typeof session.deriveMessages !== 'function') return false
   try {
     const msgs = (session.deriveMessages() ?? []) as Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>
-    let lastAssistant = ''
+    // v0.10.5：向前找「最后一条不含 tool-call 块的 assistant 消息」= 最后一条最终回复。
+    // 回合中途的工具环消息（带 tool-call）不是 user-facing final reply——把它们当最终回复判定
+    // 会让 miss 警告在 agentic 会话几乎常驻（误告警 → 模型习惯化 → 真漏卡被无视；实测
+    // autofill-ai-parser-L3/L4 会话 82K prompt 下即此模式）。无先前最终回复（首轮/纯工具环）
+    // → 无从判定「上一条漏了」→ false（style 段的 MANDATORY 契约仍然全程有效）。
     for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i]?.role === 'assistant') {
-        lastAssistant = (msgs[i].content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
-        break
-      }
+      const m = msgs[i]
+      if (m?.role !== 'assistant') continue
+      const content = m.content ?? []
+      if (content.some((c) => c.type === 'tool-call' || c.type === 'tool_use' || c.type === 'toolCalls')) continue
+      const lastFinal = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
+      const trimmed = lastFinal.trimStart()
+      return trimmed.length === 0 || !trimmed.startsWith(DIGEST_MARK)
     }
-    const trimmed = lastAssistant.trimStart()
-    return trimmed.length === 0 || !trimmed.startsWith(DIGEST_MARK)
+    return false
   } catch {
     return false
   }
