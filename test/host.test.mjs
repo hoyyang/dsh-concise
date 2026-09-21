@@ -71,6 +71,12 @@ test('registers style + reminder sections with per-session gating', async () => 
   assert.match(style, /Length and structure are NOT exemptions/)
   assert.match(style, /long explanation replies/)
   assert.match(style, /Task-completion reports/)
+  // 0.11.0：摘要卡书写风格（caveman × humanizer 精华）——结论前置 + 电报体密度 + 去 AI 套话
+  assert.match(style, /Digest content style \(caveman × humanizer\)/)
+  assert.match(style, /first sentence IS the conclusion/)
+  assert.match(style, /rule-of-three/)
+  assert.match(style, /不是X而是Y/)
+  assert.match(style, /vague attribution/)
   assert.match(reminder, /REMINDER \(Concise output style\)/)
   assert.match(reminder, /摘要 digest blockquote/)
   // 0.8.3 自检清单式 reminder：点名交付汇报型与长解释型两大失效模式

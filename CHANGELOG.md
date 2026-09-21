@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] - 2026-09-21
+
+### Added
+- **摘要卡书写规则融合 caveman × humanizer 精华（纯提示词文本增量，client 渲染零改动）**：style 正文新增
+  `Digest content style (caveman × humanizer)` 条款——①首句即结论（答案 / 决定 / 产物，绝不背景与过程
+  复述）②电报体密度（砍客套与连接词填充，只留事实与数字）③去 AI 套话（禁空洞总结句、三连排比、
+  「不是X而是Y」句式、模糊归因、夸大意义词），同一事物只用一个名称且只提一次。
+  `> **摘要：**` 格式契约、MARK_RE 渲染、划选复制、chip 与交付物点击打开全部不变；
+  state / config / schema 零变更，升级无迁移。措辞回归沿用 0.8.1 防再犯基线
+  （长解释型 + 表格型 + 交付话术型样本 staging 实测）。
+- 精华来源：JuliusBrussee/caveman（电报体压缩）与 blader/humanizer（Wikipedia《Signs of AI writing》
+  模式清单精选）——两者均为 Claude Code / Codex 形态，本插件将其核心规则移植进摘要卡契约。
+
 ## [0.10.6] - 2026-09-20
 
 ### Fixed

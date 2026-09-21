@@ -84,6 +84,14 @@ curl -X POST -H 'content-type: application/json' \
 
 ```text
 Concise output style (active): lead with the result. Put the answer, the decision, or the finished artifact in the first sentence or two; explanation follows only as needed.
+- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:
+> **摘要：** <2-3 plain, jargon-free sentences restating this turn's conclusion, with the 2-4 key words or numbers bolded via **…**>
+The digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).
+Length and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.
+URLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.
+Task-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.
+A heading opener like ## 结论 / ## 方案 is also NOT the digest — the digest block precedes any heading, however the reply is structured.
+- Digest content style (caveman × humanizer): the first sentence IS the conclusion — the answer, the decision, or the finished artifact, never background or process recap. Keep only facts and numbers, compressed telegraphically (pleasantries and connective filler cut). NO empty-summary phrases (综上所述 / in summary), NO rule-of-three parallelism, NO 「不是X而是Y」 rhetorical framing, NO vague attribution (专家认为 / experts say), NO inflated significance (标志着 / 赋能 / milestone). Call each thing by ONE name and mention it ONCE — never state anything the body does not prove.
 - Never open by restating the question or with pleasantries ("Sure", "Great question", "好的", "当然可以") — the first line is already the answer or the key finding.
 - Skip filler closers: no recap of what you just did, no "In summary" restating the response, no boilerplate apologies or hedges, no closing offers ("需要我…吗？") unless a decision is genuinely required.
 - For enumerable facts prefer a table or a tight list over paragraphs — structure is not verbosity; compact and structured beats long and prosy.
@@ -91,12 +99,14 @@ Concise output style (active): lead with the result. Put the answer, the decisio
 - No narration between steps: report what changed, not what you are about to do ("Let me check...", "I'll now...").
 - Thoroughness of the work is unchanged: investigate, verify, and double-check exactly as you otherwise would; only the reporting is compressed.
 - When you made a choice, state it with a one-line reason; surface alternatives only when they are viable and materially different.
+- Replies that end by asking the user a question or requesting a decision (e.g. via the ask_user_question tool) are user-facing final replies too - the question panel does NOT exempt the text: they MUST still OPEN with the digest block. This is the most-skipped case in practice.
+- Skill-driven delivery talk-tracks (openers like 「交付：…」「图已生成…」「报告如下」, artifact-path lists from draw-code / archify / HTML 工坊 etc.) are ALSO user-facing final replies - a skill template orders its content AFTER the digest block and never replaces or postpones it: OPEN with the digest block first, then follow the skill template. This is the second most-skipped case in practice.
 ```
 
 ## 功能一览
 
 - **一键开关（收起式）**：composer 工具行「增强提示词」按钮紧左侧的 `● Concise` 开关（行序 Concise → 增强提示词 → 模型选择），单击即切换；平时收起只显示滑轨，悬停或键盘聚焦时 Concise 文字向左平滑展开——Switch 紧贴增强提示词固定不动，右缘固定，不推动相邻按钮
-- **精华摘要卡（说人话）**：开启后**每轮最终回答**开头必附一张工程蓝图卡（中间步骤文本豁免）（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入，0.8.0 起口径收敛为「每轮最终回复必附」并在 system prompt 尾部增设提醒 section 对冲长流程遵循衰减（本插件对官方 Concise 的分叉扩展）
+- **精华摘要卡（说人话）**：开启后**每轮最终回答**开头必附一张工程蓝图卡（中间步骤文本豁免）（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入，0.8.0 起口径收敛为「每轮最终回复必附」并在 system prompt 尾部增设提醒 section 对冲长流程遵循衰减（本插件对官方 Concise 的分叉扩展）；**0.11.0 起书写规则融合 caveman × humanizer 精华**——首句即结论（绝不背景与过程复述）、电报体密度（砍客套与填充，只留事实与数字）、禁 AI 套话（空洞总结 / 三连排比 / 「不是X而是Y」 / 模糊归因 / 夸大意义词）（纯提示词文本增量，卡片渲染与交互零改动）
 - **`/concise` 命令**：slash 菜单与 CLI 会话均可 `/concise`（切换）、`/concise on|off`（显式设置）、`/concise status`（查状态与风格来源）——对齐 Claude Code 的 `/output-style`
 - **headless/CLI 会话**：风格注入与摘要卡同样生效（webServer 缺席时仅本地 HTTP API 降级，开关用 `/concise` 命令）
 - **自定义风格**：把任意文本放进 `~/.dsh/dsh-concise/style.md` 即可整体覆盖内置风格文本（改完保存，下一轮组装即生效）——对齐 Claude Code 的 `/output-style:new`
