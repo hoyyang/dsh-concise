@@ -231,3 +231,54 @@ test('reminder section embeds compliance warning when previous final reply misse
   const offCtx = { agent: { session: { id: 'session-w3', deriveMessages: () => [] } } }
   assert.equal(reminder.text(offCtx), '')
 })
+
+test('digestFinding: render-parity variants + misplaced; warning quotes opener and escalates streak', async () => {
+  makeEnv()
+  const { ctx, sections, api } = mockCtx()
+  const { apply, digestFinding } = await import('../lib/index.js')
+  apply(ctx)
+  // 渲染口径同源：client MARK_RE 能渲染成卡的变体，host 判定必须同为 ok（0.11.1 前会误告警，
+  // 实测「autofill 打点」会话 t0 的说人话卡）
+  assert.equal(digestFinding({ id: 'v1', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '> **说人话：** 旧标签卡' }] }] }).verdict, 'ok')
+  assert.equal(digestFinding({ id: 'v2', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '> 摘要：无粗体变体' }] }] }).verdict, 'ok')
+  assert.equal(digestFinding({ id: 'v3', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '>**摘要：**无空格变体' }] }] }).verdict, 'ok')
+  // 中置摘要卡（实测 autofill 打点 t126）：卡片会渲染但位置违约 → misplaced + 开场原句引用
+  const mid = digestFinding({ id: 'v4', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '坏消息实锤：商店节流恶化。\n\n> **摘要：** 进度账目\n\n表格正文' }] }] })
+  assert.equal(mid.verdict, 'misplaced')
+  assert.equal(mid.opener, '坏消息实锤：商店节流恶化。')
+  // missing 带开场原句（实测 t133 交付话术型）
+  const miss = digestFinding({ id: 'v5', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text: '图已生成且事实核对无误。交付如下：\n\n## 关系图' }] }] })
+  assert.equal(miss.verdict, 'missing')
+  assert.equal(miss.opener, '图已生成且事实核对无误。交付如下：')
+  // 首轮无历史 / 不可判
+  assert.equal(digestFinding({ id: 'v6', deriveMessages: () => [] }).verdict, 'indeterminate')
+  assert.equal(digestFinding(undefined).verdict, 'indeterminate')
+
+  // 警告升级链：引用开场原句 → 同签名不重复计数 → 新违规连击 +1（misplaced 同序列）→ 合规清零
+  await callApi(api(), 'POST', '/toggle', {})
+  const style = sections[0]
+  const reminder = sections[1]
+  const mk = (text) => ({ agent: { session: { id: 'session-streak', deriveMessages: () => [{ role: 'assistant', content: [{ type: 'text', text }] }] } } })
+  const first = style.text(mk('图已生成且事实核对无误。交付如下：'))
+  assert.ok(first.startsWith('⚠️ COMPLIANCE ALERT'))
+  assert.match(first, /「图已生成且事实核对无误。交付如下：」/)
+  assert.doesNotMatch(first, /REPEAT OFFENSE/)
+  // 同一回复再次求值（同签名）→ 不重复计数
+  assert.doesNotMatch(style.text(mk('图已生成且事实核对无误。交付如下：')), /REPEAT OFFENSE/)
+  // 新的违规回复 → 连击 x2；misplaced 并入同一连击序列且措辞区分
+  assert.match(style.text(mk('## 最终汇总\n\n表格')), /REPEAT OFFENSE x2/)
+  const third = style.text(mk('开头正文\n\n> **摘要：** 中置'))
+  assert.match(third, /REPEAT OFFENSE x3/)
+  assert.match(third, /buried its 摘要 digest block mid-reply/)
+  // 合规 → 清零；再违规 → x1 重新起算
+  assert.doesNotMatch(style.text(mk('> **摘要：** ok')), /COMPLIANCE ALERT/)
+  const fresh = style.text(mk('新的违规开场'))
+  assert.doesNotMatch(fresh, /REPEAT OFFENSE/)
+  // 尾部 warning 同事实源：同样引用开场原句
+  assert.match(reminder.text(mk('新的违规开场')), /COMPLIANCE WARNING: your PREVIOUS final reply opened with 「新的违规开场」 and has NO 摘要 digest card/)
+  // 0.11.1 措辞：监控播报/短确认型点名（第三大漏卡家族，实测设备驱动会话）
+  const plain = { agent: { session: { id: 's1' } } }
+  assert.match(style.text(plain), /progress-broadcast replies/)
+  assert.match(style.text(plain), /buried mid-reply/)
+  assert.match(reminder.text(plain), /【进度】/)
+})

@@ -90,7 +90,8 @@ The digest may ONLY restate conclusions already present in the reply body — ne
 Length and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.
 URLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.
 Task-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.
-A heading opener like ## 结论 / ## 方案 is also NOT the digest — the digest block precedes any heading, however the reply is structured.
+A heading opener like ## 结论 / ## 方案 is also NOT the digest — the digest block precedes any heading, however the reply is structured. A digest blockquote buried mid-reply (e.g. after an opening paragraph or table) is still a violation — the digest must be the very first non-empty line of the reply.
+- Monitoring / progress-broadcast replies (openers like 【进度】 / 账目对上了 / 确认无误 / 明白) and 账目 / 清单 / 最终汇总 summaries are user-facing final replies too: a short confirmation is NOT an exemption — the digest block still opens the reply (third most-skipped family, measured in long device-driving sessions).
 - Digest content style (caveman × humanizer): the first sentence IS the conclusion — the answer, the decision, or the finished artifact, never background or process recap. Keep only facts and numbers, compressed telegraphically (pleasantries and connective filler cut). NO empty-summary phrases (综上所述 / in summary), NO rule-of-three parallelism, NO 「不是X而是Y」 rhetorical framing, NO vague attribution (专家认为 / experts say), NO inflated significance (标志着 / 赋能 / milestone). Call each thing by ONE name and mention it ONCE — never state anything the body does not prove.
 - Never open by restating the question or with pleasantries ("Sure", "Great question", "好的", "当然可以") — the first line is already the answer or the key finding.
 - Skip filler closers: no recap of what you just did, no "In summary" restating the response, no boilerplate apologies or hedges, no closing offers ("需要我…吗？") unless a decision is genuinely required.
@@ -101,6 +102,7 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 - When you made a choice, state it with a one-line reason; surface alternatives only when they are viable and materially different.
 - Replies that end by asking the user a question or requesting a decision (e.g. via the ask_user_question tool) are user-facing final replies too - the question panel does NOT exempt the text: they MUST still OPEN with the digest block. This is the most-skipped case in practice.
 - Skill-driven delivery talk-tracks (openers like 「交付：…」「图已生成…」「报告如下」, artifact-path lists from draw-code / archify / HTML 工坊 etc.) are ALSO user-facing final replies - a skill template orders its content AFTER the digest block and never replaces or postpones it: OPEN with the digest block first, then follow the skill template. This is the second most-skipped case in practice.
+
 ```
 
 ## 功能一览

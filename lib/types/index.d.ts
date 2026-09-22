@@ -72,13 +72,34 @@ interface SessionLike {
     };
     deriveMessages?: () => unknown;
 }
-/** 摘要块起始标记（host 侧判定口径；与 client MARK_RE 渲染口径同源）。 */
+/** 摘要块起始标记（生成契约口径：措辞要求模型精确输出的形态）。 */
 export declare const DIGEST_MARK = "> **\u6458\u8981\uFF1A**";
 /**
- * 检查会话派生历史里「最后一条 assistant 消息」是否以摘要块开头。
- * 返回 true = 缺摘要（含首轮尚无 assistant 历史）；上下文不可判（无 session / deriveMessages /
- * 求值异常）一律返回 false —— 不可判时不告警，绝不阻断组装。纯函数，供 section 求值与单测共用。
+ * 摘要块「检测」正则（host 判定口径）——必须与 client MARK_RE（blockquote textContent 前缀
+ * /^(摘要：|说人话：)/）渲染口径同源：client 渲染成卡的形态 = blockquote 行以可选粗体的
+ * 摘要：/说人话： 开头。0.11.0 及之前 host 只认严格 '> **摘要：**'，会把 client 已渲染成卡的
+ * 变体（'> 摘要：…'、'> **说人话：**…'）误判为缺卡 → 误告警（实测「autofill 打点」会话 t0 即说人话卡）。
  */
+export declare const DIGEST_DETECT_RE: RegExp;
+/** 上一条最终回复的摘要判定结论。indeterminate = 上下文不可判（无 session/deriveMessages/异常/首轮）。 */
+export type DigestVerdict = 'ok' | 'misplaced' | 'missing' | 'indeterminate';
+export interface DigestFinding {
+    verdict: DigestVerdict;
+    /** missing/misplaced 时：违规最终回复的首行（截 80 字符），供警告点名引用。 */
+    opener?: string;
+    /** missing/misplaced 时：整条回复的稳定签名（长度+首行）——miss 连击按签名去重计数。 */
+    sig?: string;
+}
+/**
+ * 判定会话派生历史里「最后一条最终回复」的摘要合规性（纯函数，供 section 求值与单测共用）。
+ * 向前找「最后一条不含 tool-call 块的 assistant 消息」= 最后一条最终回复（0.10.5 口径：回合中途的
+ * 工具环消息不是 user-facing final reply，把它们当最终回复判定会让 miss 警告在 agentic 会话常驻）。
+ * ok = 以摘要块开头（含可选粗体/说人话变体，渲染口径见 DIGEST_DETECT_RE）；
+ * misplaced = 摘要块存在但不在第一行（卡片有渲染，但契约要求 digest 先于一切）；
+ * missing = 没有任何摘要块；indeterminate = 无先前最终回复或上下文不可判（不告警不阻断组装）。
+ */
+export declare function digestFinding(session: SessionLike | undefined | null): DigestFinding;
+/** 兼容口径：缺摘要（missing 或 misplaced 都算违反「digest 必须第一行」契约）。不可判 → false。 */
 export declare function isDigestMissing(session: SessionLike | undefined | null): boolean;
 interface HostContext {
     systemPrompt?: SystemPromptLike;

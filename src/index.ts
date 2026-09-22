@@ -36,7 +36,8 @@ export type ConfigType = { defaultEnabled?: boolean }
 /** Concise 输出风格正文：注入 system prompt 的实际内容（无 style.md 覆盖时使用）。 */
 export const CONCISE_STYLE_TEXT = [
   'Concise output style (active): lead with the result. Put the answer, the decision, or the finished artifact in the first sentence or two; explanation follows only as needed.',
-  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).\nLength and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.\nURLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.\nTask-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.\nA heading opener like ## 结论 / ## 方案 is also NOT the digest — the digest block precedes any heading, however the reply is structured.',
+  '- MANDATORY on every user-facing final reply (the reply that ends the turn and answers the user — intermediate step narration between tool calls is exempt): BEGIN with the digest block in EXACTLY this blockquote format, then continue with the normal answer:\n> **摘要：** <2-3 plain, jargon-free sentences restating this turn\'s conclusion, with the 2-4 key words or numbers bolded via **…**>\nThe digest may ONLY restate conclusions already present in the reply body — never introduce facts, trade-offs, or analogies the body does not contain; give any unavoidable term a short plain-language gloss in parentheses. However short the answer, the digest block is always present (it is not a recap — it precedes the answer).\nLength and structure are NOT exemptions: long explanation replies, step-by-step walkthroughs, and table-heavy documents are where the digest gets skipped most often — such replies must still OPEN with the digest block, before any heading, table, or body text.\nURLs, file paths, and code spans stay bare in the digest (or use [label](url) markdown) — bold (**) is for words and numbers only; bolding a URL corrupts the rendered link.\nTask-completion reports (openers like 全部完成 / 已实施 / 方案已落盘 / 交付物清单) are NOT a substitute for the digest — such replies MUST still BEGIN with the digest block.\nA heading opener like ## 结论 / ## 方案 is also NOT the digest — the digest block precedes any heading, however the reply is structured. A digest blockquote buried mid-reply (e.g. after an opening paragraph or table) is still a violation — the digest must be the very first non-empty line of the reply.',
+  '- Monitoring / progress-broadcast replies (openers like 【进度】 / 账目对上了 / 确认无误 / 明白) and 账目 / 清单 / 最终汇总 summaries are user-facing final replies too: a short confirmation is NOT an exemption — the digest block still opens the reply (third most-skipped family, measured in long device-driving sessions).',
   '- Digest content style (caveman × humanizer): the first sentence IS the conclusion — the answer, the decision, or the finished artifact, never background or process recap. Keep only facts and numbers, compressed telegraphically (pleasantries and connective filler cut). NO empty-summary phrases (综上所述 / in summary), NO rule-of-three parallelism, NO 「不是X而是Y」 rhetorical framing, NO vague attribution (专家认为 / experts say), NO inflated significance (标志着 / 赋能 / milestone). Call each thing by ONE name and mention it ONCE — never state anything the body does not prove.',
   '- Never open by restating the question or with pleasantries ("Sure", "Great question", "好的", "当然可以") — the first line is already the answer or the key finding.',
   '- Skip filler closers: no recap of what you just did, no "In summary" restating the response, no boilerplate apologies or hedges, no closing offers ("需要我…吗？") unless a decision is genuinely required.',
@@ -56,12 +57,10 @@ const SECTION_ORDER = 40
 /** 尾部提醒 section：system prompt 末尾再敲一次「最终回复必附摘要」，对冲长 prompt 下的遵循衰减。 */
 const REMINDER_SECTION_NAME = 'dsh-concise:reminder'
 const REMINDER_SECTION_ORDER = 900
-const REMINDER_TEXT = 'REMINDER (Concise output style): before ending this turn, SELF-CHECK the final user-facing text block - its first characters must be the 摘要 digest blockquote exactly as defined in the Concise output style section above. Intermediate step narration between tool calls stays exempt, but the exemption NEVER carries to the final reply: after the last tool call, restart the digest discipline. Task-completion reports and long explanations are the most common violations, and replies that end with a user-facing question/decision prompt (ask_user_question) or that follow a skill delivery template (「交付：…」「图已生成…」 openers from draw-code etc.) are equally NOT exempt - the skill template comes after the digest block.'
-/** v0.10.0：miss 时的首屏警告 - 插到 style section 最开头（模型最先读到的位置）。
- *  实证：仅靠尾部 reminder 追加 WARNING 在超长 system prompt（80K+ 字符）里被模型持续忽略。 */
-const DIGEST_MISS_BANNER = '⚠️ COMPLIANCE ALERT: your PREVIOUS final reply opened WITHOUT the 摘要 digest blockquote. THIS reply MUST BEGIN with "> **摘要：** ..." as its very first characters - before any heading, table, list, or body text. No exceptions.'
-/** 上一条最终回复缺摘要时追加的反馈句（miss 检测闭环，v0.8.3）。 */
-const MISS_WARNING = 'COMPLIANCE WARNING: your previous final reply violated the digest contract (no 摘要 card). THIS reply MUST begin with the digest block — no exceptions.'
+const REMINDER_TEXT = 'REMINDER (Concise output style): before ending this turn, SELF-CHECK the final user-facing text block - its first characters must be the 摘要 digest blockquote exactly as defined in the Concise output style section above. Intermediate step narration between tool calls stays exempt, but the exemption NEVER carries to the final reply: after the last tool call, restart the digest discipline. Task-completion reports and long explanations are the most common violations, and replies that end with a user-facing question/decision prompt (ask_user_question) or that follow a skill delivery template (「交付：…」「图已生成…」 openers from draw-code etc.) are equally NOT exempt - the skill template comes after the digest block. Short monitoring/进度 confirmations (明白 / 确认无误 / 【进度】) and 账目/清单 summaries count as final replies too.'
+// v0.10.0 的静态 DIGEST_MISS_BANNER / MISS_WARNING 常量在 0.11.1 升级为 missAlert() 构造器
+// （见 apply() 内）：泛化警告在 80K+ system prompt 的监控型会话被模型持续无视（实测「autofill 打点」
+// 会话 9 次漏卡中 7 次警告在场仍漏）——0.11.1 起警告点名违规回复的开场原句并按连击升级。
 
 /** 会话条目上限：超出时按最近使用淘汰，防 state.json 无界增长。 */
 const MAX_SESSION_ENTRIES = 500
@@ -213,23 +212,39 @@ interface SessionLike {
   header?: { cwd?: string }
   deriveMessages?: () => unknown
 }
-/** 摘要块起始标记（host 侧判定口径；与 client MARK_RE 渲染口径同源）。 */
+/** 摘要块起始标记（生成契约口径：措辞要求模型精确输出的形态）。 */
 export const DIGEST_MARK = '> **摘要：**'
 
 /**
- * 检查会话派生历史里「最后一条 assistant 消息」是否以摘要块开头。
- * 返回 true = 缺摘要（含首轮尚无 assistant 历史）；上下文不可判（无 session / deriveMessages /
- * 求值异常）一律返回 false —— 不可判时不告警，绝不阻断组装。纯函数，供 section 求值与单测共用。
+ * 摘要块「检测」正则（host 判定口径）——必须与 client MARK_RE（blockquote textContent 前缀
+ * /^(摘要：|说人话：)/）渲染口径同源：client 渲染成卡的形态 = blockquote 行以可选粗体的
+ * 摘要：/说人话： 开头。0.11.0 及之前 host 只认严格 '> **摘要：**'，会把 client 已渲染成卡的
+ * 变体（'> 摘要：…'、'> **说人话：**…'）误判为缺卡 → 误告警（实测「autofill 打点」会话 t0 即说人话卡）。
  */
-export function isDigestMissing(session: SessionLike | undefined | null): boolean {
-  if (!session || typeof session.deriveMessages !== 'function') return false
+export const DIGEST_DETECT_RE = /^>\s*\*{0,2}(?:摘要|说人话)\*{0,2}[：:]/
+
+/** 上一条最终回复的摘要判定结论。indeterminate = 上下文不可判（无 session/deriveMessages/异常/首轮）。 */
+export type DigestVerdict = 'ok' | 'misplaced' | 'missing' | 'indeterminate'
+export interface DigestFinding {
+  verdict: DigestVerdict
+  /** missing/misplaced 时：违规最终回复的首行（截 80 字符），供警告点名引用。 */
+  opener?: string
+  /** missing/misplaced 时：整条回复的稳定签名（长度+首行）——miss 连击按签名去重计数。 */
+  sig?: string
+}
+
+/**
+ * 判定会话派生历史里「最后一条最终回复」的摘要合规性（纯函数，供 section 求值与单测共用）。
+ * 向前找「最后一条不含 tool-call 块的 assistant 消息」= 最后一条最终回复（0.10.5 口径：回合中途的
+ * 工具环消息不是 user-facing final reply，把它们当最终回复判定会让 miss 警告在 agentic 会话常驻）。
+ * ok = 以摘要块开头（含可选粗体/说人话变体，渲染口径见 DIGEST_DETECT_RE）；
+ * misplaced = 摘要块存在但不在第一行（卡片有渲染，但契约要求 digest 先于一切）；
+ * missing = 没有任何摘要块；indeterminate = 无先前最终回复或上下文不可判（不告警不阻断组装）。
+ */
+export function digestFinding(session: SessionLike | undefined | null): DigestFinding {
+  if (!session || typeof session.deriveMessages !== 'function') return { verdict: 'indeterminate' }
   try {
     const msgs = (session.deriveMessages() ?? []) as Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>
-    // v0.10.5：向前找「最后一条不含 tool-call 块的 assistant 消息」= 最后一条最终回复。
-    // 回合中途的工具环消息（带 tool-call）不是 user-facing final reply——把它们当最终回复判定
-    // 会让 miss 警告在 agentic 会话几乎常驻（误告警 → 模型习惯化 → 真漏卡被无视；实测
-    // autofill-ai-parser-L3/L4 会话 82K prompt 下即此模式）。无先前最终回复（首轮/纯工具环）
-    // → 无从判定「上一条漏了」→ false（style 段的 MANDATORY 契约仍然全程有效）。
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
       if (m?.role !== 'assistant') continue
@@ -237,12 +252,25 @@ export function isDigestMissing(session: SessionLike | undefined | null): boolea
       if (content.some((c) => c.type === 'tool-call' || c.type === 'tool_use' || c.type === 'toolCalls')) continue
       const lastFinal = content.filter((c) => c.type === 'text').map((c) => c.text ?? '').join('')
       const trimmed = lastFinal.trimStart()
-      return trimmed.length === 0 || !trimmed.startsWith(DIGEST_MARK)
+      if (DIGEST_DETECT_RE.test(trimmed)) return { verdict: 'ok' }
+      const opener = (trimmed.split('\n').find((l) => l.trim().length > 0) ?? '').trim().slice(0, 80)
+      const sig = String(trimmed.length) + '|' + opener
+      if (trimmed.length === 0) return { verdict: 'missing', sig }
+      if (trimmed.split('\n').some((l) => DIGEST_DETECT_RE.test(l.trimStart()))) {
+        return { verdict: 'misplaced', opener, sig }
+      }
+      return { verdict: 'missing', opener, sig }
     }
-    return false
+    return { verdict: 'indeterminate' }
   } catch {
-    return false
+    return { verdict: 'indeterminate' }
   }
+}
+
+/** 兼容口径：缺摘要（missing 或 misplaced 都算违反「digest 必须第一行」契约）。不可判 → false。 */
+export function isDigestMissing(session: SessionLike | undefined | null): boolean {
+  const v = digestFinding(session).verdict
+  return v === 'missing' || v === 'misplaced'
 }
 
 interface HostContext {
@@ -417,10 +445,12 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
       text: (context) => {
         const sid = sessionIdOf(context)
         if (!isEnabled(sid)) return ''
-        // v0.10.0：上一条最终回复缺摘要 → 首屏警告插在最前（尾部 reminder 另有 WARNING 双保险）
+        // v0.10.0：上一条最终回复缺摘要 → 首屏警告插在最前（尾部 reminder 另有 WARNING 双保险）。
+        // v0.11.1：警告点名违规回复的开场原句并按连击升级（0.10.5 实证泛化警告被无视）。
         const base = activeStyle().text
         const session = (context as { agent?: { session?: SessionLike } } | undefined)?.agent?.session
-        return isDigestMissing(session) ? DIGEST_MISS_BANNER + '\n\n' + base : base
+        const alert = missAlert(sid, digestFinding(session), 'banner')
+        return alert !== null ? alert + '\n\n' + base : base
       },
     }), 'dsh-concise: prompt section')
     ctx.effect(() => ctx.systemPrompt!.section({
@@ -441,6 +471,33 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
     log.warn?.('[dsh-concise] systemPrompt service missing — style injection disabled')
   }
 
+  /** v0.11.1：miss 警告构造器——引用违规回复的开场原句 + 连击升级。
+   *  连击按（会话, 回复签名）去重计数（同一回复在本回合多次组装求值不重复计数），合规即清零。
+   *  内存态：进程重启清零可接受——警告是软反馈，不承载状态正确性。
+   *  kind = banner（style 段最前，模型最先读到）/ warning（尾部 reminder 追加），双通道同一事实源。 */
+  const missStreak = new Map<string, { sig: string; n: number }>()
+  function missAlert(sid: string | null, finding: DigestFinding, kind: 'banner' | 'warning'): string | null {
+    if (finding.verdict !== 'missing' && finding.verdict !== 'misplaced') {
+      if (sid !== null) missStreak.delete(sid)
+      return null
+    }
+    const sig = finding.sig ?? ''
+    const prev = sid !== null ? missStreak.get(sid) : undefined
+    const n = prev && prev.sig === sig ? prev.n : (prev?.n ?? 0) + 1
+    if (sid !== null) missStreak.set(sid, { sig, n })
+    const opener = finding.opener ? '「' + finding.opener + '」' : ''
+    const core = finding.verdict === 'misplaced'
+      ? 'your PREVIOUS final reply buried its 摘要 digest block mid-reply' + (opener ? ' after opening with ' + opener : '') + ' — a digest the user sees mid-text is not the contract; it must BE the first line'
+      : opener
+        ? 'your PREVIOUS final reply opened with ' + opener + ' and has NO 摘要 digest card'
+        : 'your PREVIOUS final reply has NO 摘要 digest card'
+    const repeat = n >= 2 ? ' REPEAT OFFENSE x' + n + ': consecutive final replies keep violating the first-line digest rule — break the pattern on THIS reply.' : ''
+    if (kind === 'banner') {
+      return '⚠️ COMPLIANCE ALERT: ' + core + '. THIS reply MUST BEGIN with "> **摘要：** ..." as its very first characters - before any heading, table, list, or body text. No exceptions.' + repeat
+    }
+    return 'COMPLIANCE WARNING: ' + core + '. THIS reply MUST begin with the digest block — no exceptions.' + repeat
+  }
+
   /** 上一条最终回复缺摘要时返回追加到尾部提醒后的合规警告；无法判定返回空串。
    *  顺带刷新会话 cwd 缓存（每轮组装至少经过此处一次；v0.9.2 起这是 cwd 唯一刷新点）。 */
   function complianceWarning(context: unknown): string {
@@ -450,9 +507,11 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
       const sid = typeof rawId === 'function' ? String(rawId()) : typeof rawId === 'string' ? rawId : null
       const cwd = session?.header?.cwd
       if (sid !== null && typeof cwd === 'string' && cwd.length > 0) { cwdBySession.set(sid, cwd); lastKnownCwd = cwd }
-      if (!isDigestMissing(session)) return ''
-      log.info?.('[dsh-concise] previous final reply missed the digest - compliance warning attached for session ' + (sid ?? ''))
-      return '\n\n' + MISS_WARNING + '\n\n(Compliance check: the previous final reply in this session opened without the 摘要 digest blockquote — this session is on notice.)'
+      const finding = digestFinding(session)
+      const alert = missAlert(sid, finding, 'warning')
+      if (alert === null) return ''
+      log.info?.('[dsh-concise] previous final reply violated the digest contract (' + finding.verdict + ') - compliance warning attached for session ' + (sid ?? ''))
+      return '\n\n' + alert
     } catch {
       return ''
     }
