@@ -275,12 +275,17 @@ test('digestFinding: render-parity variants + misplaced; warning quotes opener a
   const fresh = style.text(mk('新的违规开场'))
   assert.doesNotMatch(fresh, /REPEAT OFFENSE/)
   // 尾部 warning 同事实源：同样引用开场原句
-  assert.match(reminder.text(mk('新的违规开场')), /COMPLIANCE WARNING: your PREVIOUS final reply opened with 「新的违规开场」 and has NO 摘要 digest card/)
+  assert.match(reminder.text(mk('新的违规开场')), /COMPLIANCE WARNING: your PREVIOUS user-facing text \(final reply or a presentation artifact such as a design card\) opened with 「新的违规开场」 and has NO 摘要 digest card/)
   // 0.11.1 措辞：监控播报/短确认型点名（第三大漏卡家族，实测设备驱动会话）
   const plain = { agent: { session: { id: 's1' } } }
   assert.match(style.text(plain), /progress-broadcast replies/)
   assert.match(style.text(plain), /buried mid-reply/)
   assert.match(reminder.text(plain), /【进度】/)
+  // 0.11.3：面板前工件形态点名（dsh-session-manager 会话实证：设计卡消息被「中间步骤豁免」吞掉）
+  assert.match(style.text(plain), /Presentation artifacts between tool calls are NOT narration/)
+  assert.match(style.text(plain), /right before an ask_user_question panel/)
+  assert.match(reminder.text(plain), /design\/decision cards issued right before a choice panel/)
+  assert.doesNotMatch(reminder.text(plain), /Intermediate tool-loop narration between tool calls stays exempt/)
 })
 
 test('pre-step digest reminder: transient last-message injection per request (v0.11.2)', async () => {

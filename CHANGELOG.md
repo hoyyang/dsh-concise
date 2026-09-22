@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.3] - 2026-09-22
+
+### Fixed
+- **「选择卡片（拍板面板）场景摘要卡不显示」根治：中间步骤豁免收窄为「仅旁白，不含用户可读工件」**。
+  实证（dsh-session-manager 会话 seq238/1088）：dsh-plugin-build 0B 的设计卡消息（文本型 assistant、
+  后跟工具步）被 Concise 的「intermediate step narration is exempt」豁免吞掉 → 无摘要卡；且面板调用
+  本身不带文本，0.10.0 的「面板最终回复必附摘要」措辞无可附着对象——同族新形态，非旧修复回归。
+  **冲突三方**：skill 0B 早已要求「摘要行放最前」（line 65）、concise style 豁免旁白、0.11.2 每步提醒
+  里也带着同一句豁免（最高显著性位置反向强化漏卡）。修复 = style 新增
+  "Presentation artifacts between tool calls are NOT narration"（点名设计卡/决策卡/对比表 + 面板前
+  工件形态），reminder 与每步提醒同步收窄豁免措辞；host miss 警告措辞改形态无关
+  （"user-facing text (final reply or a presentation artifact such as a design card)"，中途工件警告
+  不再错误自称 final reply）。
+- 配套：dsh-plugin-build skill 0B 第 65 行补优先级声明（本条优先于 Concise「中间步骤豁免」，不影响
+  流水线机制）。
+- **防再犯沉淀**：多文本面（style/reminder/每步提醒）携带同一契约时，任何豁免/例外措辞的修改必须
+  三处同步（本轮冲突正是 0.11.2 只顾显著性、复制了旧豁免句所致）——已列入措辞改动 checklist。
+
+
+
 ## [0.11.2] - 2026-09-22
 
 ### Fixed
