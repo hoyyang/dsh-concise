@@ -282,3 +282,42 @@ test('digestFinding: render-parity variants + misplaced; warning quotes opener a
   assert.match(style.text(plain), /buried mid-reply/)
   assert.match(reminder.text(plain), /【进度】/)
 })
+
+test('pre-step digest reminder: transient last-message injection per request (v0.11.2)', async () => {
+  makeEnv()
+  const { ctx, listeners, api } = mockCtx()
+  const { apply } = await import('../lib/index.js')
+  apply(ctx)
+  const hook = listeners['agent/pre-step']
+  assert.equal(typeof hook, 'function', 'pre-step hook registered')
+  const next = async () => ({ kind: 'continue', messages: [{ role: 'user', content: [{ type: 'text', text: '继续' }] }] })
+  const signal = { aborted: false }
+  // 默认关闭 → 不注入
+  const off = await hook({ agent: { session: { id: 'session-a' } }, step: 2, signal }, next)
+  assert.equal(off.messages.length, 1)
+  // 打开 default → 主会话每步注入：最后一条 = plugin 署名摘要契约提醒
+  await callApi(api(), 'POST', '/toggle', {})
+  const on = await hook({ agent: { session: { id: 'session-a' } }, step: 3, signal }, next)
+  assert.equal(on.messages.length, 2)
+  const last = on.messages[1]
+  assert.equal(last.role, 'user')
+  assert.equal(last.source.kind, 'plugin')
+  assert.equal(last.source.plugin, 'dsh-concise')
+  assert.equal(last.source.form, 'digest-reminder')
+  assert.match(last.content[0].text, /\u003e \*\*\u6458\u8981\uff1a\*\*/)
+  assert.match(last.content[0].text, /NOT exempt/)
+  assert.ok(typeof last.id === 'string' && last.id.length > 0, 'message carries stable identity')
+  // 子代理裸 UUID 独立会话 → 不注入
+  const sub = await hook({ agent: { session: { id: '8f2b1c3d-1234-5678-9abc-def012345678' } }, step: 2, signal }, next)
+  assert.equal(sub.messages.length, 1)
+  // reject 决定原样透传（同一对象）
+  const reject = { kind: 'reject', reason: 'quota' }
+  const rej = await hook({ agent: { session: { id: 'session-a' } }, step: 1, signal }, async () => reject)
+  assert.equal(rej, reject)
+  // 空消息列表 → 原样（不追加孤儿提醒）
+  const empty = await hook({ agent: { session: { id: 'session-a' } }, step: 1, signal }, async () => ({ kind: 'continue', messages: [] }))
+  assert.equal(empty.messages.length, 0)
+  // aborted → 原样
+  const ab = await hook({ agent: { session: { id: 'session-a' } }, step: 1, signal: { aborted: true } }, next)
+  assert.equal(ab.messages.length, 1)
+})

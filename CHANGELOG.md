@@ -3,6 +3,25 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.2] - 2026-09-22
+
+### Fixed
+- **摘要卡缺卡根治：新增每步请求尾部的瞬态摘要契约提醒（agent/pre-step 通道）**。发布前复测
+  「autofill 打点」会话再次缺卡（15:06 轮，审查报告型 = 标题开场 + 核对表格；当时 0.11.1 全量措辞
+  在场、无警告——机制按设计运行，仍漏）。根因升级：措辞迭代 7 轮后仍漏的本质是**显著性**——契约
+  位于 141K system prompt 头部，生成时模型注意力在对话尾部。修复 = 经 agent/pre-step 瀑布中间件
+  （宿主官方先例：dsh-time-context / dsh-agent-instructions 同通道同拼接法）把一行摘要契约提醒拼接为
+  每步 LLM 请求的【最后一条消息】= 生成前最后一个可读位置。注入为请求级瞬态（不落盘、不进转写、
+  不累积；实测 time-context 在 5389 事件转写中 0 残留）。端到端验证：staging headless 让模型复述
+  「最后一条用户消息」，其逐字引出的即本提醒文本。
+- 约束：仅主会话下发（子代理为裸 UUID 独立会话，不下发）；会话级开关关闭不下发；reject/空消息/
+  aborted 原样透传。零新依赖（createUserMessage 形状手工构造，node:crypto randomUUID）。
+- **防再犯沉淀（本轮新增一条）**：渲染/判定类修复必须做「行为级端到端验证」——单元测试 + 转写取证
+  不足以证明注入类通道真实可达（0.8.4 waterfall 事件可达但注入无效、本轮 info 日志在 headless 不可
+  见均为此类坑），以「模型可观测行为」为最终证据。
+
+
+
 ## [0.11.1] - 2026-09-22
 
 ### Fixed

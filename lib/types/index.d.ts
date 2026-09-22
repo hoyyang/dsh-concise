@@ -101,6 +101,20 @@ export interface DigestFinding {
 export declare function digestFinding(session: SessionLike | undefined | null): DigestFinding;
 /** 兼容口径：缺摘要（missing 或 misplaced 都算违反「digest 必须第一行」契约）。不可判 → false。 */
 export declare function isDigestMissing(session: SessionLike | undefined | null): boolean;
+/** agent/pre-step waterfall 载荷（dsh-time-context / dsh-agent-instructions 同款；实测出处见 CHANGELOG 0.11.2）。 */
+interface PreStepPayload {
+    agent?: {
+        session?: SessionLike;
+    };
+    step?: number;
+    signal?: {
+        aborted?: boolean;
+    };
+}
+interface PreStepDecision {
+    kind?: string;
+    messages?: unknown[];
+}
 interface HostContext {
     systemPrompt?: SystemPromptLike;
     commands?: CommandsLike;
@@ -110,6 +124,10 @@ interface HostContext {
         error?: (...args: unknown[]) => void;
     };
     effect: (fn: () => unknown | (() => void), label?: string) => void;
+    /** cordis 事件总线：注册 agent/pre-step 瀑布中间件用（可选，缺失时降级为仅 system prompt 通道）。 */
+    on?: (event: string, handler: (payload: PreStepPayload, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>, opts?: {
+        prepend?: boolean;
+    }) => () => void;
     /** cordis registry：服务可用时才执行回调（可选服务装配；headless 下 webServer 永不出现、回调不触发）。 */
     inject: (deps: string[], callback: (scoped: {
         webServer: WebServerLike;
