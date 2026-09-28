@@ -500,13 +500,29 @@ export function apply(ctx: ClientContext): void {
       // v0.10.1：存在性过滤——正文示例里的假路径（实测 mmdc -o x.png 被当成交付物）不列；
       // verify 不可用时降级保留启发式结果（与旧行为一致）
       let resolvedAbs: Record<string, string> = {}
+      const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
+      // v0.11.4：本回合工具真实产出（生图/写文件/present 等）——正文把路径写截断（…482Z-….png）
+      // 或只写目录时扫描必漏，转写里的工具产出才是权威来源；排在正文扫描结果之前。
+      let produced: string[] = []
+      if (sid) {
+        try {
+          const res = await fetch('/dsh-concise/api/turn-artifacts?sessionId=' + encodeURIComponent(sid), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ digest: bq.textContent ?? '' }),
+          })
+          if (res.ok) {
+            const j = await res.json() as { files?: unknown }
+            if (Array.isArray(j.files)) produced = j.files.filter((x): x is string => typeof x === 'string' && x.startsWith('/'))
+          }
+        } catch { /* degrade: 仅正文扫描 */ }
+      }
       if (files.length > 0) {
         try {
-          const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
           const res = await fetch('/dsh-concise/api/verify-paths?sessionId=' + encodeURIComponent(sid), {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ paths: files }),
+            body: JSON.stringify({ paths: files, filesOnly: true }),
           })
           if (res.ok) {
             const j = await res.json() as { existing?: unknown; resolved?: unknown }
@@ -518,6 +534,14 @@ export function apply(ctx: ClientContext): void {
           }
         } catch { /* degrade */ }
       }
+      // 合并：工具产出在前；正文项解析到同一绝对路径的去重；卡内已写全的不重复列
+      const cardText = bq.textContent ?? ''
+      const producedSet = new Set(produced)
+      files = [
+        ...produced.filter((p) => !cardText.includes(p)),
+        ...files.filter((f) => !producedSet.has(resolvedAbs[f] ?? f)),
+      ].slice(0, 8)
+      for (const p of produced) resolvedAbs[p] = p
       if (files.length === 0) return false
       const zone = document.createElement('div')
       zone.className = 'dsh-concise-files'

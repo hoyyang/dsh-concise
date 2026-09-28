@@ -326,3 +326,66 @@ test('pre-step digest reminder: transient last-message injection per request (v0
   const ab = await hook({ agent: { session: { id: 'session-a' } }, step: 1, signal: { aborted: true } }, next)
   assert.equal(ab.messages.length, 1)
 })
+
+
+test('artifactsFromTranscript: turn-scoped tool outputs survive truncated/dir-only digest text (v0.11.4)', async () => {
+  const { artifactsFromTranscript } = await import('../lib/index.js')
+  const J = (o) => JSON.stringify(o)
+  const img1 = '/Users/demo/.dsh/generated_images/dsh-image-gen/2026-09-28T08-25-13-482Z-aaaa.png'
+  const img2 = '/Users/demo/.dsh/generated_images/dsh-image-gen/2026-09-28T08-27-55-334Z-bbbb.png'
+  const msg = (text, extra = []) => J({ type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text }, ...extra] } } })
+  const lines = [
+    J({ type: 'turn/start', data: { turn: 1 } }),
+    J({ type: 'tool/call', data: { callId: 'w0', name: 'write', arguments: J({ file_path: 'old/turn1.md', content: 'x' }) } }),
+    msg('> **摘要：** 第一回合 旧产物 已写入'),
+    J({ type: 'turn/start', data: { turn: 2 } }),
+    J({ type: 'tool/ptc-dispatch', data: { name: 'dsh_image_gen', arguments: { prompt: 'p' }, isError: false, content: [{ type: 'text', text: 'Generated one image. Path: ' + img1 }] } }),
+    J({ type: 'tool/call', data: { callId: 'g2', name: 'dsh_image_gen', arguments: '{}' } }),
+    J({ type: 'tool/result', data: { message: { content: [{ type: 'tool-result', toolCallId: 'g2', content: [{ type: 'text', text: J({ path: img2 }) }] }] } } }),
+    J({ type: 'tool/ptc-dispatch', data: { name: 'dsh_image_gen', isError: true, content: [{ type: 'text', text: '/Users/demo/fail.png' }] } }),
+    J({ type: 'tool/call', data: { callId: 'r1', name: 'read', arguments: J({ file_path: '/Users/demo/src/a.ts' }) } }),
+    msg('> **摘要：** 两张示意图已生成，文件在 ~/.dsh/generated_images/dsh-image-gen/…482Z-….png', [{ type: 'tool-call', name: 'run_code' }]),
+    J({ type: 'tool/call', data: { callId: 'p1', name: 'present', arguments: J({ files: [{ path: '/Users/demo/out/report.html' }] }) } }),
+    msg('> **摘要：** 两张图已用预览打开，文件在 ~/.dsh/generated_images/dsh-image-gen/ 下'),
+  ]
+  // seq490 复刻：截断路径形态，产物截至该消息
+  assert.deepEqual(artifactsFromTranscript(lines, '摘要： 两张示意图已生成，文件在 ~/.dsh/generated_images/dsh-image-gen/…482Z-….png', '/Users/demo'), [img1, img2])
+  // seq504 复刻：只写目录形态，同回合后续 present 也算
+  assert.deepEqual(artifactsFromTranscript(lines, '摘要： 两张图已用预览打开，文件在 ~/.dsh/generated_images/dsh-image-gen/ 下', '/Users/demo'), [img1, img2, '/Users/demo/out/report.html'])
+  // 上一回合的卡只拿上一回合的产物（相对路径按 cwd 解析）；read 与失败生图不算
+  assert.deepEqual(artifactsFromTranscript(lines, '摘要： 第一回合 旧产物 已写入', '/Users/demo'), ['/Users/demo/old/turn1.md'])
+  assert.deepEqual(artifactsFromTranscript(lines, '摘要： 完全无关的一段话内容', '/Users/demo'), [])
+  assert.deepEqual(artifactsFromTranscript(lines, '摘要', '/Users/demo'), [])
+})
+
+test('turn-artifacts endpoint fails loud on bad input; verify-paths filesOnly drops directories (v0.11.4)', async () => {
+  makeEnv()
+  const { ctx, api } = mockCtx()
+  const { apply } = await import('../lib/index.js')
+  apply(ctx)
+  assert.equal((await callApi(api(), 'POST', '/turn-artifacts', { digest: 'x' })).status, 400)
+  assert.equal((await callApi(api(), 'POST', '/turn-artifacts?sessionId=session-abc', {})).status, 400)
+  const missing = await callApi(api(), 'POST', '/turn-artifacts?sessionId=session-nope', { digest: '摘要： 某段结论文字' })
+  assert.equal(missing.status, 404)
+  assert.match(missing.payload.error, /session-nope/)
+  const dir = process.env.DSH_HOME
+  const v = await callApi(api(), 'POST', '/verify-paths', { paths: [dir, 'package.json'], filesOnly: true })
+  assert.deepEqual(v.payload.existing, ['package.json'])
+  const v2 = await callApi(api(), 'POST', '/verify-paths', { paths: [dir] })
+  assert.deepEqual(v2.payload.existing, [dir], 'without filesOnly directories still verify (card chips)')
+})
+
+
+test('decodeZstdFrames: decodes every frame of an append-only multi-frame log (v0.11.4)', async (t) => {
+  const z = await import('node:zlib')
+  if (typeof z.zstdCompressSync !== 'function') return t.skip('node:zlib zstd unavailable')
+  const { decodeZstdFrames } = await import('../lib/index.js')
+  const parts = Array.from({ length: 30 }, (_, i) => '{"seq":' + i + ',"pad":"' + 'x'.repeat(i * 37) + '"}\n')
+  const buf = Buffer.concat(parts.map((p) => z.zstdCompressSync(Buffer.from(p))))
+  // 单次解码只拿到第一帧——这正是 0.11.4 端点首版在真机返回空的原因
+  assert.equal(z.zstdDecompressSync(buf).toString(), parts[0])
+  assert.equal(decodeZstdFrames(buf, z.zstdDecompressSync).toString(), parts.join(''))
+  // 末帧不完整（写入中）：已完整的帧照常返回
+  const partial = Buffer.concat([buf, z.zstdCompressSync(Buffer.from('tail\n')).subarray(0, 6)])
+  assert.equal(decodeZstdFrames(partial, z.zstdDecompressSync).toString(), parts.join(''))
+})

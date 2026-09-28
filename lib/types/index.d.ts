@@ -133,6 +133,8 @@ interface HostContext {
         webServer: WebServerLike;
     }) => unknown) => unknown;
 }
+export declare function artifactsFromTranscript(lines: string[], digestText: string, cwd: string): string[];
+export declare function decodeZstdFrames(buf: Buffer, decompress: (b: Buffer) => Buffer): Buffer;
 /**
  * 挂载 Concise 输出风格：提示词 section + 会话级开关 + API + host 命令 + 持久化。
  * @param ctx - host 根上下文。
