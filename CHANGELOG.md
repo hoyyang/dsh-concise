@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.4] - 2026-09-28
+
+### Fixed
+- **交付物区漏列生成图片（dsh-project-manager 会话实测，同类问题第四次）→ 交付物来源改为「本回合工具真实产出」**。
+  实证（seq490/504）：模型在正文里把图片路径写成 `…482Z-….png` 截断形态、或只写目录，正文扫描必漏；
+  而 dsh_image_gen 的完整 path 就在转写里（seq458/472）。0.10.x 四轮都在补正文正则，这次换权威来源：
+  host 新增 `POST /dsh-concise/api/turn-artifacts`（Origin 同源、sessionId 形态校验、错误点名 400/404/501），
+  按摘要文本定位它所在回合，收集回合内产物工具输出（write.file_path / present.files / html_dev_gallery.file /
+  dsh_image_gen 与 draw_code 结果中的绝对路径；直接调用与 run_code 内嵌 ptc-dispatch 两种形态），只留存在的文件。
+  client 合并：工具产出在前，正文扫描补充，去重，上限 8。不从 bash 命令猜产物，read/edit 不算交付物。
+- **转写多帧解码**：会话转写是多个 zstd frame 拼接的追加日志（实测 249 帧），`zstdDecompressSync` 与流式解码都只解
+  第一帧且不报错（端点首版真机返回空的根因）。新增 `decodeZstdFrames` 逐帧解码（与宿主 session-persistence 同法），
+  与 `zstd -dc` 逐字节一致，18MB 转写 97ms。
+- **`~/.dsh` 目录被误列为交付物**：`.dsh` 被当作扩展名骗过 detectPathKind；verify-paths 新增 `filesOnly`，交付物区只列文件
+  （卡内路径 chip 点开目录的行为不变）。
+
 ## [0.11.3] - 2026-09-22
 
 ### Fixed
