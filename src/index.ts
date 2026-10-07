@@ -620,7 +620,10 @@ export function apply(ctx: HostContext, config: ConfigType = {}): void {
           id: randomUUID(),
           role: 'user',
           content: [{ type: 'text', text: DIGEST_STEP_REMINDER }],
-          source: { kind: 'plugin', plugin: name, form: 'digest-reminder' },
+          // v0.11.5：source 用 v4 原生 producer kind（'plugin:<name>'）。dsh 0.2.0 起 session v4 admission
+          // 拒绝旧式 { kind: 'plugin', plugin: … } 包裹（"format v4 message requires a producer-owned
+          // source kind"），该消息一旦落盘校验失败，整轮 turn 在第一步前即报错中止。
+          source: { kind: 'plugin:' + name, form: 'digest-reminder' },
         }],
       }
     }, { prepend: true }), 'dsh-concise: pre-step digest reminder')

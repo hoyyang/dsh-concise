@@ -306,8 +306,8 @@ test('pre-step digest reminder: transient last-message injection per request (v0
   assert.equal(on.messages.length, 2)
   const last = on.messages[1]
   assert.equal(last.role, 'user')
-  assert.equal(last.source.kind, 'plugin')
-  assert.equal(last.source.plugin, 'dsh-concise')
+  assert.equal(last.source.kind, 'plugin:dsh-concise')
+  assert.equal(last.source.plugin, undefined)
   assert.equal(last.source.form, 'digest-reminder')
   assert.match(last.content[0].text, /\u003e \*\*\u6458\u8981\uff1a\*\*/)
   assert.match(last.content[0].text, /NOT exempt/)
