@@ -1,0 +1,9 @@
+怎么让 AI 回复更简洁少废话
+每轮回答自动生成摘要卡
+Claude Code Concise 输出风格
+按会话切换输出风格
+DeepSeek Harness concise output style
+dsh plugin digest card
+per-session output style toggle
+reduce AI reply verbosity
+clickable file paths in chat

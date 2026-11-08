@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { detectPathKind, splitPathSegments, collectDeliverables } from '../src/client/chips.ts'
+import { detectPathKind, splitPathSegments, collectDeliverables, locatePathSegments, segmentAt } from '../src/client/chips.ts'
 
 test('detectPathKind maps extensions and urls to typed info', () => {
   assert.equal(detectPathKind('/Users/demo/Desktop/L4.png').kind, 'image')
@@ -267,3 +267,19 @@ test('splitPathSegments keeps CJK folder paths and mac-style paren filenames chi
   assert.deepEqual(files.map((f) => f.value), ['/Users/demo/汇总目录', '/Users/demo/Copy(2).png'])
 })
 
+
+// v0.11.6：卡内路径只读高亮——命中测试下标必须与原文逐字符对齐（Range 直接用这些下标）
+test('locatePathSegments offsets index the original text exactly', () => {
+  const text = '结论在 /Users/demo/a.png，另见 https://x.com/y 与 src/b.ts。'
+  const segs = locatePathSegments(text)
+  assert.deepEqual(segs.map((s) => s.type), ['file', 'url', 'file'])
+  for (const s of segs) assert.equal(text.slice(s.start, s.end), s.value)
+})
+
+test('segmentAt hits inside a path and misses prose', () => {
+  const text = '见 src/b.ts 的实现'
+  const at = text.indexOf('b.ts')
+  assert.equal(segmentAt(text, at)?.value, 'src/b.ts')
+  assert.equal(segmentAt(text, 0), null)
+  assert.equal(segmentAt(text, text.indexOf('的')), null)
+})

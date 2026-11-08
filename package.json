@@ -1,7 +1,7 @@
 {
   "name": "dsh-concise",
-  "description": "Concise 输出风格开关：结果先行、少废话（基于 Claude Code 内置 Concise output style + 本插件扩展）。composer 工具行一键开关（「增强提示词」按钮紧左侧、模型选择按钮左侧区域），平时收起只显示滑轨、悬停向左展开（右缘固定），按会话独立生效（新会话默认关），开启后每轮最终回答开头自动附「摘要」精华摘要卡（中间步骤文本豁免），支持 /concise 命令、style.md 自定义风格与本地 API。",
-  "version": "0.11.4",
+  "description": "Concise output style for dsh: per-session toggle + digest card with clickable files. 简洁输出、每轮附摘要卡、路径可点。",
+  "version": "0.11.6",
   "type": "module",
   "main": "lib/index.js",
   "license": "MIT",
@@ -14,12 +14,16 @@
     "url": "https://github.com/hoyyang/dsh-concise/issues"
   },
   "keywords": [
-    "deepseek",
-    "harness",
-    "dsh",
     "dsh-plugin",
+    "deepseek-harness",
+    "concise",
     "output-style",
-    "concise"
+    "digest",
+    "summary",
+    "claude",
+    "llm",
+    "productivity",
+    "plugin"
   ],
   "scripts": {
     "build": "bash scripts/build.sh",
@@ -50,6 +54,7 @@
     "src",
     "scripts",
     "assets",
+    "cordis.patch.yml",
     "LICENSE",
     "README.md",
     "README.en.md",

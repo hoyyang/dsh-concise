@@ -19,8 +19,8 @@
  * 跨重启持久。按钮通过槽位 inject 拿到当前会话 id，所有状态读写都带 sessionId。
  */
 import React from 'react'
-import { normalizeDigestHref, normalizeDigestText } from './normalize'
-import { applyChipEnhancement, buildChip, collectDeliverables } from './chips'
+import { normalizeDigestHref } from './normalize'
+import { activatePath, buildChip, collectDeliverables, collectPathRanges, highlightName, kindColor, pathTextEligible, PATH_KINDS, segmentAt } from './chips'
 import { createRoot } from 'react-dom/client'
 
 type SlotsService = {
@@ -108,6 +108,9 @@ const css = [
   '.dsh-concise-digest::after{content:"";position:absolute;inset:7px;pointer-events:none;background:linear-gradient(#E8926B,#E8926B) 0 0/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 0 0/2px 12px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 0/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 0/2px 12px no-repeat,linear-gradient(#E8926B,#E8926B) 0 100%/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 0 100%/2px 12px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 100%/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 100%/2px 12px no-repeat;opacity:.85;animation:bp-brackets .5s ease .12s backwards}',
   '.dsh-concise-digest:hover{border-color:rgba(201,87,59,.35)!important;box-shadow:0 4px 16px rgba(217,119,87,.12)!important;transform:translateY(-1px)}',
   '.dsh-concise-digest:hover::before{opacity:.85}',
+  '.dsh-concise-digest[data-dcc-hover]{cursor:pointer}',
+  '.dsh-concise-digest.dcc-opened{border-color:rgba(34,197,94,.55)!important}',
+  '.dsh-concise-digest.dcc-copied{border-color:rgba(217,119,87,.7)!important}',
   '.dsh-concise-digest{animation:bp-in .4s ease backwards}',
   '@keyframes bp-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
   '@keyframes bp-brackets{from{opacity:0}to{opacity:.9}}',
@@ -448,10 +451,60 @@ export function apply(ctx: ClientContext): void {
   // 卡片内容就冻结在 chip 化那一刻（实证：屏幕显示与持久化转写不一致，切会话重挂载才恢复完整）。
   // 修复 = 卡片样式类即时挂（className 不影响 React 文本更新），DOM 改写延迟到「内容连续 STABLE_MS
   // 无变化」（近似流式结束）；此后内容再变（宿主重渲染覆盖插件 DOM）→ 重置窗口重来，chip 缺失即补挂。
+  //
+  // v0.11.6 根治（所有会话助手回复同时消失、刷新才恢复）：稳定窗口只降低概率——chip 化后宿主任何一次
+  // 重渲染（续写/折叠/重排）仍会 reconcile 到被替换的文本节点，React 抛 NotFoundError(removeChild)，
+  // SlotErrorBoundary 把 conversation.chat.node/assistant-step entry 整体 abdicate（全会话共享）。
+  // 现在卡内一律只读：路径用 CSS Custom Highlight 着色 + 点击命中测试；链接只修 href（属性不碰子节点）；
+  // 唯一的写入是追加插件自有的交付物区（只 append 不替换宿主节点，React 不追踪它）。
   ctx.effect(() => {
     if (typeof document === 'undefined') return
     const MARK_RE = /^(摘要：|说人话：)/
     const STABLE_MS = 1200
+    // 卡内路径高亮：每张卡的 Range 列表；全量重建（Range 指向宿主节点，节点被替换即自动失效为空）
+    const cardRanges = new Map<Element, Array<{ range: Range; kind: string }>>()
+    const highlightRegistry = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights
+    const HighlightCtor = (globalThis as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight
+    const syncHighlights = (): void => {
+      if (!highlightRegistry || !HighlightCtor) return
+      for (const kind of PATH_KINDS) {
+        const ranges: Range[] = []
+        for (const list of cardRanges.values()) for (const r of list) if (r.kind === kind) ranges.push(r.range)
+        if (ranges.length > 0) highlightRegistry.set(highlightName(kind), new HighlightCtor(...ranges))
+        else highlightRegistry.delete(highlightName(kind))
+      }
+    }
+    const hlStyle = document.createElement('style')
+    hlStyle.dataset.plugin = 'dsh-concise'
+    hlStyle.textContent = PATH_KINDS.map((k) => '::highlight(' + highlightName(k) + '){color:' + kindColor(k) + ';text-decoration:underline dotted;text-underline-offset:3px}').join('')
+    document.head.appendChild(hlStyle)
+    const hitPath = (ev: MouseEvent): { value: string; isUrl: boolean; card: HTMLElement } | null => {
+      const card = (ev.target as Element | null)?.closest?.('.dsh-concise-digest') as HTMLElement | null
+      if (!card) return null
+      const pos = (document as { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null }).caretPositionFromPoint?.(ev.clientX, ev.clientY)
+      if (!pos || pos.offsetNode.nodeType !== Node.TEXT_NODE || !card.contains(pos.offsetNode) || !pathTextEligible(pos.offsetNode)) return null
+      const seg = segmentAt(pos.offsetNode.textContent ?? '', pos.offset)
+      return seg ? { value: seg.value, isUrl: seg.type === 'url', card } : null
+    }
+    const onCardClick = (ev: MouseEvent): void => {
+      if (window.getSelection()?.isCollapsed === false) return // 框选复制优先
+      const hit = hitPath(ev)
+      if (!hit) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      void activatePath(hit.value, hit.isUrl, hit.card)
+    }
+    const onCardMove = (ev: MouseEvent): void => {
+      const card = (ev.target as Element | null)?.closest?.('.dsh-concise-digest') as HTMLElement | null
+      if (!card) return
+      const on = hitPath(ev) !== null
+      if ((card.dataset.dccHover === '1') !== on) {
+        if (on) card.dataset.dccHover = '1'
+        else delete card.dataset.dccHover
+      }
+    }
+    document.addEventListener('click', onCardClick, true)
+    document.addEventListener('mousemove', onCardMove, { passive: true })
     interface CardState { sig: string; enhanced: boolean; timer: number | undefined }
     const cards = new Map<Element, CardState>()
     let queued = 0
@@ -568,12 +621,11 @@ export function apply(ctx: ClientContext): void {
         const href = a.getAttribute('href') ?? ''
         const fixedHref = normalizeDigestHref(href)
         if (fixedHref !== href) a.setAttribute('href', fixedHref)
-        const text = a.textContent ?? ''
-        const fixedText = normalizeDigestText(text)
-        if (fixedText !== text) a.textContent = fixedText
+        // v0.11.6：显示文字不再改写——a.textContent = … 会替换 React 管理的文本节点（同一崩溃源）
       }
-      // v0.8.5：卡内路径 chip 化（网页跳转 / 本地文件点击复制，类型图标 + 协调动效）
-      applyChipEnhancement(bq)
+      // v0.11.6：卡内路径只读高亮（替代 v0.8.5 的 replaceChild chip 化）
+      cardRanges.set(bq, collectPathRanges(bq))
+      syncHighlights()
       // v0.10.0：交付物聚合区（卡片底部；bq 来自 querySelectorAll 必为 HTMLElement 场景）
       if (bq instanceof HTMLElement) void renderDeliverables(bq)
     }
@@ -583,7 +635,7 @@ export function apply(ctx: ClientContext): void {
         const hit = MARK_RE.test((bq.textContent ?? '').trimStart())
         bq.classList.toggle('dsh-concise-digest', hit)
         if (hit && !bq.title) bq.title = '划选卡内文字，松开即复制'
-        if (!hit) { cards.delete(bq); continue }
+        if (!hit) { cards.delete(bq); if (cardRanges.delete(bq)) syncHighlights(); continue }
         let st = cards.get(bq)
         if (!st) { st = { sig: '', enhanced: false, timer: undefined }; cards.set(bq, st) }
         const sig = contentSig(bq)
@@ -608,17 +660,21 @@ export function apply(ctx: ClientContext): void {
             }
             attempt(2)
           }, STABLE_MS)
-        } else if (st.enhanced && st.timer === undefined && bq.querySelector('.dsh-concise-chip') === null) {
-          // 内容未变但 chip 不在了（宿主重渲染覆盖了插件 DOM）：稳定内容直接补挂（幂等）
-          enhanceCard(bq)
+        } else if (st.timer === undefined && cardRanges.get(bq)?.some((r) => r.range.collapsed)) {
+          // 内容未变但宿主重渲染换掉了文本节点（Range 塌缩）：只读重算高亮，不碰 DOM
+          cardRanges.set(bq, collectPathRanges(bq))
+          syncHighlights()
         }
       }
+      let pruned = false
       for (const [el, st] of cards) {
         if (!el.isConnected) {
           if (st.timer !== undefined) window.clearTimeout(st.timer)
           cards.delete(el)
+          pruned = cardRanges.delete(el) || pruned
         }
       }
+      if (pruned) syncHighlights()
     }
     const schedule = (): void => {
       if (queued) return
@@ -651,13 +707,19 @@ export function apply(ctx: ClientContext): void {
     return () => {
       observer.disconnect()
       document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('click', onCardClick, true)
+      document.removeEventListener('mousemove', onCardMove)
       if (queued) { cancelAnimationFrame(queued); queued = 0 }
       for (const [, st] of cards) { if (st.timer !== undefined) window.clearTimeout(st.timer) }
       cards.clear()
+      cardRanges.clear()
+      if (highlightRegistry) for (const kind of PATH_KINDS) highlightRegistry.delete(highlightName(kind))
+      hlStyle.remove()
       // 卸载即净：摘除本插件添加的卡片样式类与状态标记
       document.querySelectorAll('.dsh-concise-digest').forEach((node) => {
         node.classList.remove('dsh-concise-digest')
         delete (node as HTMLElement).dataset.copied
+        delete (node as HTMLElement).dataset.dccHover
       })
     }
   }, 'dsh-concise: digest card renderer')

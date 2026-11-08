@@ -2,7 +2,7 @@
 
 ![banner](assets/banner.png)
 
-基于 Claude Code 内置 **Concise 输出风格**（自 2.1.258 起上游未再变动）并加入本插件扩展，带进 DeepSeek Harness（dsh）：composer 工具行一键开关（「增强提示词」按钮紧左侧、模型选择按钮左侧区域）——**结果先行，少废话**，而调查、验证、多角度审查的工作深浅完全不变；开启后每轮**最终回答**开头必附「摘要」精华摘要卡（工具调用间的中间步骤文本豁免；工程蓝图卡：极淡网格线 + 四角测量角标 + 等宽字体 1.18em，浅底深字；划选卡内文字松开即复制）。
+基于 Claude Code 内置 **Concise 输出风格**（自 2.1.258 起上游未再变动）并加入本插件扩展，带进 DeepSeek Harness（dsh）：composer 工具行一键开关（「增强提示词」按钮紧左侧、模型选择按钮左侧区域）——**结果先行，少废话**，而调查、验证、多角度审查的工作深浅完全不变；开启后每轮**最终回答**开头必附「摘要」精华摘要卡（工具调用间的中间步骤文本豁免；工程蓝图卡：极淡网格线 + 四角测量角标 + 等宽字体 1.18em，浅底深字；划选卡内文字松开即复制；卡内文件路径高亮可点，单击用系统默认应用打开；卡底自动汇总本回合真实产出的文件）。
 
 [**English**](README.en.md) · [Releases](https://github.com/hoyyang/dsh-concise/releases) · [更新日志](CHANGELOG.md)
 
@@ -18,9 +18,9 @@
 ## 安装
 
 ```sh
-dsh plugin add hoyyang/dsh-concise   # GitHub 仓库
+dsh plugin add dsh-concise           # npm 包（推荐：全局唯一标识）
 # 或
-dsh plugin add dsh-concise           # npm 包
+dsh plugin add hoyyang/dsh-concise   # GitHub 仓库
 ```
 
 **零配置，开箱即用**：不需要 API Key、不需要账号、没有任何设置项。装完刷新 Web 界面，composer 工具行就会出现开关。要求 dsh web 0.1.0-rc.8+（实测通过）。
@@ -80,7 +80,7 @@ curl -X POST -H 'content-type: application/json' \
 
 ## 实际注入的提示词（原文）
 
-开启后，以下文本作为系统提示词 section 注入当前会话的每轮模型请求（`order 40`）：
+开启后，以下文本作为系统提示词 section 注入当前会话的每轮模型请求（`order 40`；另有 `order 900` 的尾部提醒 section，以及经宿主 `agent/pre-step` 通道追加在每步请求末尾的一行瞬态契约提醒，三处文本同源、同一开关门控）：
 
 ```text
 Concise output style (active): lead with the result. Put the answer, the decision, or the finished artifact in the first sentence or two; explanation follows only as needed.
@@ -101,6 +101,7 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 - Thoroughness of the work is unchanged: investigate, verify, and double-check exactly as you otherwise would; only the reporting is compressed.
 - When you made a choice, state it with a one-line reason; surface alternatives only when they are viable and materially different.
 - Replies that end by asking the user a question or requesting a decision (e.g. via the ask_user_question tool) are user-facing final replies too - the question panel does NOT exempt the text: they MUST still OPEN with the digest block. This is the most-skipped case in practice.
+- Presentation artifacts between tool calls are NOT narration: a design card, decision card, comparison, or any message the user must read to act or choose (e.g. a 设计卡 issued right before an ask_user_question panel) MUST open with the digest block even though more tool steps follow - the intermediate exemption covers narration only, never user-facing artifacts. A bare panel call with no text does not satisfy this; the artifact text right before the panel carries the digest.
 - Skill-driven delivery talk-tracks (openers like 「交付：…」「图已生成…」「报告如下」, artifact-path lists from draw-code / archify / HTML 工坊 etc.) are ALSO user-facing final replies - a skill template orders its content AFTER the digest block and never replaces or postpones it: OPEN with the digest block first, then follow the skill template. This is the second most-skipped case in practice.
 
 ```
@@ -108,8 +109,11 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 ## 功能一览
 
 - **一键开关（收起式）**：composer 工具行「增强提示词」按钮紧左侧的 `● Concise` 开关（行序 Concise → 增强提示词 → 模型选择），单击即切换；平时收起只显示滑轨，悬停或键盘聚焦时 Concise 文字向左平滑展开——Switch 紧贴增强提示词固定不动，右缘固定，不推动相邻按钮
-- **精华摘要卡（说人话）**：开启后**每轮最终回答**开头必附一张工程蓝图卡（中间步骤文本豁免）（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入，0.8.0 起口径收敛为「每轮最终回复必附」并在 system prompt 尾部增设提醒 section 对冲长流程遵循衰减（本插件对官方 Concise 的分叉扩展）；**0.11.0 起书写规则融合 caveman × humanizer 精华**——首句即结论（绝不背景与过程复述）、电报体密度（砍客套与填充，只留事实与数字）、禁 AI 套话（空洞总结 / 三连排比 / 「不是X而是Y」 / 模糊归因 / 夸大意义词）（纯提示词文本增量，卡片渲染与交互零改动）
-- **每步生成前契约提醒（0.11.2）**：经宿主 agent/pre-step 通道在每步 LLM 请求的最后追加一行瞬态摘要契约提醒（不落盘、不进转写、不累积，仅主会话下发）——对冲超长 system prompt 下模型注意力随多步工具环衰减的漏卡问题（实测审查报告/表格型回复漏卡的根治手段）
+- **精华摘要卡（说人话）**：开启后**每轮最终回答**开头必附一张工程蓝图卡（中间步骤文本豁免）（极淡网格 + 四角测量角标 + 等宽字体 1.18em，浅底深字，跨主题成立）——2-3 句大白话重述本轮结论，头部 `DIGEST // 说人话`；**划选卡内文字松开即自动复制所选**（头部闪现 COPIED ✓）；只重述正文已有结论；规则无条件下发且每轮组装重注入，0.8.0 起口径收敛为「每轮最终回复必附」并在系统提示词尾部增设提醒 section 对冲长流程遵循衰减（本插件对官方 Concise 的分叉扩展）；**0.11.0 起书写规则融合 caveman × humanizer 精华**——首句即结论（绝不背景与过程复述）、电报体密度（砍客套与填充，只留事实与数字）、禁 AI 套话（空洞总结 / 三连排比 / 「不是X而是Y」 / 模糊归因 / 夸大意义词）（纯提示词文本增量，卡片渲染与交互零改动）；**0.11.6 起卡内路径改为高亮着色 + 单击命中打开**（不再改写宿主 React 管理的文本节点）
+- **交付物自动汇总（0.11.4）**：摘要卡底部「交付物 · FILES」区自动列出本回合**真实工具产出**——`write` / `present` / `dsh_image_gen` / `draw_code` / HTML 工坊结果里的文件路径（直接调用与 `run_code` 内嵌两种形态都覆盖），不是从正文里猜；渲染前做存在性校验（文件不存在或只是正文示例就不列），点击用系统默认应用打开
+- **卡内路径可点击（0.11.6）**：卡内文件路径用 CSS Custom Highlight 着色 + 虚线下划，单击按命中位置定位路径并交给宿主打开；链接只修 `href`（属性级，不动子节点）
+- **稳定性：助手回复不再整会话消失（0.11.6）**：此前的路径 chip 会替换宿主 React 管理的文本节点，宿主后续重渲染抛 `NotFoundError: removeChild`，触发共享渲染入口永久 abdicate——表现为**所有会话助手回复同时消失、刷新才恢复**。0.11.6 起插件对摘要卡只读（仅追加自有交付物区）：React 18.3.1 复现对照，旧版崩、新版零错误
+- **每步生成前契约提醒（0.11.2）**：经宿主 agent/pre-step 通道在每步 LLM 请求的最后追加一行瞬态摘要契约提醒（不落盘、不进转写、不累积，仅主会话下发）——对冲超长系统提示词下模型注意力随多步工具环衰减的漏卡问题（实测审查报告/表格型回复漏卡的根治手段）
 - **`/concise` 命令**：slash 菜单与 CLI 会话均可 `/concise`（切换）、`/concise on|off`（显式设置）、`/concise status`（查状态与风格来源）——对齐 Claude Code 的 `/output-style`
 - **headless/CLI 会话**：风格注入与摘要卡同样生效（webServer 缺席时仅本地 HTTP API 降级，开关用 `/concise` 命令）
 - **自定义风格**：把任意文本放进 `~/.dsh/dsh-concise/style.md` 即可整体覆盖内置风格文本（改完保存，下一轮组装即生效）——对齐 Claude Code 的 `/output-style:new`
@@ -141,6 +145,35 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 - **自动化流水线**：用 API 让脚本按阶段切换输出风格（如生成阶段简洁、评审阶段自然）
 - **演示与教学录制**：录屏时回复紧凑，画面信息密度更高
 
+## 适合 / 不适合
+
+**适合：**
+
+- 想让 Agent 回答「先给结论、少废话」，但不愿牺牲调查与验证深度
+- 需要在同一台机器上对不同会话用不同输出风格（评审会话简洁、创作会话自然）
+- 想每轮结束都有一张可划选复制的结论摘要卡，并直接点开本轮产出的文件
+- 用 headless / CLI 跑自动化，想用 `/concise` 或本地 API 控制风格
+
+**不适合：**
+
+- 想要更长的教程、逐步教学或完整背景科普——关掉开关即可，本插件只压缩表达
+- 期望它压缩工作过程（少查证、少验证）——工作深浅不变是硬约束
+- 完全不能接受系统提示词被注入任何内容的托管环境
+
+## 与同类对比
+
+| 能力 | dsh-concise | Claude Code 内置 Concise | AGENTS.md / CLAUDE.md 写「简洁回复」 | dsh-improve-prompt |
+| --- | --- | --- | --- | --- |
+| 适用于 DeepSeek Harness (dsh) | 是 | 否（Claude Code 内置） | 是 | 是 |
+| 一键开关 / 下一轮生效 | 是（composer 按钮 + `/concise`） | 是（`/output-style`） | 否，改文件后需重载 | 是（改提示词文本） |
+| 按会话独立 | 是 | 是 | 否（项目/全局级） | 是 |
+| 每轮摘要卡 | 是（可划选复制） | 否 | 否 | 否 |
+| 卡内路径可点 / 交付物汇总 | 是（0.11.6） | 否 | 否 | 否 |
+| 写进项目文件 | 否 | 否 | 是 | 否 |
+| 自定义风格文本 | 是（`style.md`） | 是 | 是（手写） | 是（提示词模板） |
+
+对比对象：Claude Code 内置 Concise 输出风格（2.1.258 起上游未再变动）、项目级 AGENTS.md/CLAUDE.md 约定、dsh-improve-prompt（改的是提示词文本，不是输出风格）。本插件不做提示词工程或改写，只约束表达方式并产出摘要卡。
+
 ## 工作原理
 
 ![架构图](assets/architecture-zh.png)
@@ -154,7 +187,7 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 | 会话级状态 | `$DSH_HOME/dsh-concise/state.json`：`default` + 每会话覆盖（500 条 LRU 淘汰），tmp + rename 原子写 |
 | UI 落位 | client 模块注册 `conversation.input.right` 槽作锚点，把按钮 portal 到「增强提示词」条目紧左侧（未装时模型 seat 紧左侧），`MutationObserver` 维持相对位置；React 重渲染/条目重建后自动对位 |
 | 状态同步 | toggle 后按会话广播 `dsh-concise:change` 自定义事件；15s 轻量轮询（仅可见标签页）+ focus/visibility 重取，覆盖命令行/API/其它会话入口的状态变更 |
-| 精华摘要渲染 | 风格文本要求每轮最终回答以 `> **摘要：**` 引用块开头（无条件下发 + 尾部提醒 section 双保险）；client 监听消息 DOM（subtree + rAF 合批），将以「摘要：」或旧标签「说人话：」开头的 blockquote 升级为工程蓝图卡（极淡网格 ::before 悬停增亮 + 四角角标 ::after 入场画出 + 等宽 1.18em + 划选复制交互（mouseup 读取卡内选区），概念图 assets/style-digest-v07e.png）；卸载即净 |
+| 精华摘要渲染 | 风格文本要求每轮最终回答以 `> **摘要：**` 引用块开头（无条件下发 + 尾部提醒 + 每步契约提醒三通道）；client 监听消息 DOM（subtree + rAF 合批），将以「摘要：」或旧标签「说人话：」开头的 blockquote 升级为工程蓝图卡（极淡网格 + 四角角标 + 等宽 1.18em + 划选复制）；**0.11.6 起对卡片只读**——卡内路径用 CSS Custom Highlight 着色、点击按命中位置定位（`caretPositionFromPoint`），链接只改 `href`，仅追加插件自有的交付物区（`POST /dsh-concise/api/turn-artifacts` 取本回合真实工具产出并做存在性过滤）；卸载即净 |
 
 ### 设计细节
 
@@ -167,7 +200,7 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 以下验收项在 dsh 0.1.0-rc.8 实机全部通过：
 
 - API 矩阵：`/state`、`/toggle`、`/set`、未知路径 404，输入输出全部断言通过
-- 端到端提示词验证：开启后新会话请求的 system prompt 实测携带 `Concise output style (active)`（会话日志逐字核验）；关闭后同会话下一轮请求 0 命中
+- 端到端提示词验证：开启后新会话请求的系统提示词实测携带 `Concise output style (active)`（会话日志逐字核验）；关闭后同会话下一轮请求 0 命中
 - 会话隔离验证：同一会话关→0 命中 / 开→1 命中（其它会话与 default 不受影响），按钮 fetch 实测携带真实 sessionId
 - 自定义风格端到端：style.md 写入后请求实测携带自定义文本且内置文本 0 命中（完全替换）；删除后恢复内置；回复实测遵循自定义指令（恰合一句、无列表）
 - `/concise` 命令矩阵：toggle / on / off / status 四路径实测通过，slash 菜单正确收录与执行
@@ -183,6 +216,10 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 - 稳定性验证：全流程浏览器 console 0 错误 0 警告
 - 优雅降级：模型 seat 不可寻时自动退化为 right 槽原位渲染；locale 服务缺失时内置文案兜底
 - 并发安全：状态写采用 tmp+rename 原子替换，同页多实例经事件同步不串状态
+- 单测：host 12/12、chips + normalize 29/29（`node --test`，零依赖）
+- 0.11.6 React 复现对照：同一更新序列下旧 client 抛 `NotFoundError: removeChild`（宿主 ErrorBoundary 接管整卡），新 client 0 错误；A/B 各执行一次
+- 0.11.6 真机：主实例页面加载新样式，摘要卡与交付物区正常渲染，全部折叠钮往返 3 轮零报错
+- 0.11.6 起 client 对宿主 React 托管节点只读（仅追加插件自有元素），不再触发跨会话渲染崩溃
 
 ## 常见问题
 
@@ -198,6 +235,15 @@ A heading opener like ## 结论 / ## 方案 is also NOT the digest — the diges
 **支持暗色主题吗？**
 支持。样式全部使用 dsh 的 `--dsw-alias-*` 设计令牌与少量半透明品牌色，明暗主题下均可读。
 
+**摘要卡底部的「交付物」区是怎么来的？**
+以本回合真实工具产出为准（`write` / `present` / `dsh_image_gen` / `draw_code` / HTML 工坊结果里的绝对路径），不是从正文正则里猜；渲染前还会做存在性校验——文件已删除、或只是正文里的示例路径，就不会列出来。
+
+**卡里的文件路径为什么有时点不动？**
+先按绝对路径直开，失败再按会话 cwd 候选解析；历史会话拿不到 cwd 时按路径尾部递归查找，都不存在才降级为复制路径。
+
+**升级到 0.11.6 后卡片有什么变化？**
+卡内路径不再显示类型图标，改为着色 + 虚线下划；点击行为（系统默认应用打开 / 复制降级）不变。卡片对插件只读，不会因为宿主重渲染而整卡消失。
+
 ## 本地构建
 
 ```sh
@@ -210,10 +256,13 @@ npm run typecheck    # 双 tsconfig 类型检查
 目录结构：
 
 ```text
-src/index.ts         host：提示词 section + 会话级状态 + HTTP API + /concise 命令
-src/client/index.ts  client：槽位锚点 + portal 落位 + 开关按钮
-scripts/build.sh     自包含构建脚本（pnpm/npm 均可）
-assets/              README 截图与图示
+src/index.ts          host：双提示词 section + 每步契约提醒 + 会话级状态 + HTTP API + /concise 命令
+src/client/index.ts   client：槽位锚点 + 开关按钮 + 摘要卡渲染 / 高亮 / 交付物区
+src/client/chips.ts   路径识别、点击打开、交付物 chip 纯函数
+src/client/normalize.ts 摘要链接与文本归一化
+scripts/build.sh      自包含构建脚本（pnpm/npm 均可）
+test/                 host / chips / normalize 单测（零依赖）
+assets/               README 截图与图示
 ```
 
 ## 许可证

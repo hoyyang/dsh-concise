@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.6] - 2026-10-11
+
+### Fixed
+- **Assistant replies vanished in every session until a page reload.** The digest card's in-card path chips replaced React-owned text nodes (`replaceChild`), and the link-text cleanup rewrote `a.textContent`. The 1.2 s stability window (v0.9.2) only made it rarer: any later host re-render of that card (streaming tail, fold/unfold, step regroup) reconciled against the detached nodes, React threw `NotFoundError: removeChild`, and the host's `SlotErrorBoundary` abdicated the shared `conversation.chat.node` / `assistant-step` entry — so replies disappeared across all sessions at once. Reproduced with React 18.3.1 (old client crashes, new client stays clean under the same update sequence).
+- The card is now read-only to the plugin: in-card paths are coloured with the CSS Custom Highlight API and opened by click hit-testing (`caretPositionFromPoint`); links get only their `href` repaired (attribute, no child nodes). The only DOM write left is appending the plugin-owned "交付物 · FILES" zone, which React never tracks.
+
+### Changed
+- In-card paths no longer show type icons (colour + dotted underline instead); the deliverables zone keeps its chips. Click behaviour (OS default app, cwd candidates, verify fallback, copy fallback) is unchanged and shared via `activatePath`.
+
+## [0.11.5] - 2026-10-07
+
+### Fixed
+- Digest reminder uses the v4 producer source kind.
+
 ## [0.11.4] - 2026-09-28
 
 ### Fixed

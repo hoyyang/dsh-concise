@@ -216,21 +216,66 @@ export function collectDeliverables(replyText: string, cardText: string, limit =
   return out
 }
 
-/** 判断节点是否已在 chip 或链接内（避免重复处理）。 */
-function insideChip(node: Node | null): boolean {
-  let cur: Node | null = node
-  while (cur) {
-    if (cur instanceof Element && (cur.classList.contains('dsh-concise-chip') || cur.tagName === 'A')) return true
-    cur = cur.parentNode
-  }
-  return false
-}
-
-
 /** 短时状态标：加类并定时移除。 */
 function mark(el: HTMLElement, cls: string): void {
   el.classList.add(cls)
   window.setTimeout(() => el.classList.remove(cls), 1500)
+}
+
+/**
+ * 激活一个路径（chip 点击与卡内高亮点击共用）：URL → 新窗口；本地文件 → 渲染期解析的绝对
+ * 路径直开 → cwd 候选依次试 → 单路径 verify 递归解析 → 全败降级复制。feedback 承载
+ * dcc-opened / dcc-copied 短时状态类。
+ */
+export async function activatePath(value: string, isUrl: boolean, feedback: HTMLElement, absHint?: string): Promise<void> {
+  if (isUrl) {
+    try { window.open(value, '_blank', 'noopener') } catch { /* 降级 */ }
+    return
+  }
+  const path = value
+  // open 400 = 目标不存在，无副作用，可安全连续尝试
+  const tryOpen = async (abs: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/dsh-concise/api/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: abs }),
+      })
+      return res.ok
+    } catch { return false }
+  }
+  // v0.10.2 ①：渲染期 verify 已按 basename 递归解析出的绝对路径直接用
+  if (absHint && await tryOpen(absHint)) { mark(feedback, 'dcc-opened'); return }
+  const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
+  let candidates: string[] = []
+  try {
+    const res = await fetch('/dsh-concise/api/cwd?sessionId=' + encodeURIComponent(sid))
+    if (res.ok) {
+      const j = (await res.json()) as { cwd?: string; candidates?: unknown }
+      const list = Array.isArray(j.candidates) ? j.candidates : []
+      candidates = [j.cwd ?? '', ...list.filter((c): c is string => typeof c === 'string')]
+        .filter((c, i, arr) => c.length > 0 && arr.indexOf(c) === i)
+    }
+  } catch { /* cwd unavailable */ }
+  if (candidates.length === 0) candidates = ['']
+  for (const cwd of candidates) {
+    if (await tryOpen(resolveAbsolute(path, cwd, ''))) { mark(feedback, 'dcc-opened'); return }
+  }
+  // v0.10.2 ②：点击期兜底——单路径 verify，host 按 basename 递归解析出绝对路径再开
+  try {
+    const res = await fetch('/dsh-concise/api/verify-paths?sessionId=' + encodeURIComponent(sid), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: [path] }),
+    })
+    if (res.ok) {
+      const j = (await res.json()) as { resolved?: Record<string, unknown> }
+      const abs = j.resolved?.[path]
+      if (typeof abs === 'string' && abs.startsWith('/') && (await tryOpen(abs))) { mark(feedback, 'dcc-opened'); return }
+    }
+  } catch { /* degrade */ }
+  try { await navigator.clipboard?.writeText(path) } catch { /* degrade */ }
+  mark(feedback, 'dcc-copied')
 }
 
 /** 构造单个 chip 元素（路径用 textContent 注入，防 HTML 注入；本地文件点击复制路径）。 */
@@ -244,75 +289,14 @@ export function buildChip(value: string, isUrl: boolean): Element {
     a.href = value
     a.target = '_blank'
     a.rel = 'noopener noreferrer'
-    // v0.8.6 显式跳转，不依足 <a> 默认行为）
-    el.addEventListener('click', (ev) => {
-      ev.preventDefault()
-      ev.stopPropagation()
-      try { window.open(value, '_blank', 'noopener') } catch { /* 降级 */ }
-    })
   } else {
-    const path = value
     el.title = info.label + ' · 点击用系统默认应用打开'
-    el.addEventListener('click', (ev: Event) => { const me = ev as MouseEvent;
-      ev.stopPropagation()
-      void (async () => {
-        // v0.10.0：cwd 候选依次尝试——历史会话的内存缓存可能为空（重装后未组装），
-        // host 返回 candidates（内存缓存 + 最近会话转写磁盘兜底）；open 400 = 目标不存在，
-        // 无副作用，可安全连续尝试；全败降级复制原始路径。
-        const tryOpen = async (abs: string): Promise<boolean> => {
-          try {
-            const res2 = await fetch('/dsh-concise/api/open', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ path: abs }),
-            })
-            return res2.ok
-          } catch { return false }
-        }
-        // v0.10.2 ①：渲染期 verify 已按 basename 递归解析出的绝对路径直接用——相对路径未必能从
-        // 任何候选 cwd 直连拼出（实测 draw-code/e2e-*.png 真身在 dsh-draw-code/draw-code/ 下，
-        // 直连永远 400 → 只能降级复制，即 0.10.1 用户实测回归）。
-        const preAbs = (el as HTMLElement).dataset.dccAbs
-        if (preAbs && await tryOpen(preAbs)) { mark(el as HTMLElement, 'dcc-opened'); return }
-        let candidates: string[] = []
-        try {
-          const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
-          const res = await fetch('/dsh-concise/api/cwd?sessionId=' + encodeURIComponent(sid))
-          if (res.ok) {
-            const j = (await res.json()) as { cwd?: string; candidates?: unknown }
-            const list = Array.isArray(j.candidates) ? j.candidates : []
-            candidates = [j.cwd ?? '', ...list.filter((c): c is string => typeof c === 'string')]
-              .filter((c, i, arr) => c.length > 0 && arr.indexOf(c) === i)
-          }
-        } catch { /* cwd unavailable */ }
-        if (candidates.length === 0) candidates = ['']
-        for (const cwd of candidates) {
-          const abs = resolveAbsolute(path, cwd, '')
-          if (await tryOpen(abs)) { mark(el as HTMLElement, 'dcc-opened'); return }
-        }
-        // v0.10.2 ②：点击期兜底——单路径 verify，host 按 basename 递归解析出绝对路径再开
-        // （卡内相对路径 chip 同样受益；open 仅收绝对路径，安全口径不变）
-        try {
-          const sid = (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
-          const res = await fetch('/dsh-concise/api/verify-paths?sessionId=' + encodeURIComponent(sid), {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ paths: [path] }),
-          })
-          if (res.ok) {
-            const j = (await res.json()) as { resolved?: Record<string, unknown> }
-            const abs = j.resolved?.[path]
-            if (typeof abs === 'string' && abs.startsWith('/') && (await tryOpen(abs))) {
-              mark(el as HTMLElement, 'dcc-opened')
-              return
-            }
-          }
-        } catch { /* degrade */ }
-        try { await navigator.clipboard?.writeText(path) } catch { /* degrade */ }
-        mark(el as HTMLElement, 'dcc-copied')
-      })()
-    })
   }
+  el.addEventListener('click', (ev) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    void activatePath(value, isUrl, el as HTMLElement, (el as HTMLElement).dataset.dccAbs)
+  })
   const iconHost = document.createElement('span')
   iconHost.className = 'dcc-i'
   iconHost.innerHTML = CHIP_ICONS[info.kind] ?? CHIP_ICONS.file
@@ -328,25 +312,70 @@ export function buildChip(value: string, isUrl: boolean): Element {
   return el
 }
 
-/** 摘要卡内路径 chip 化：遍历文本节点切分注入；已在链接/chip 内的文本跳过（幂等）。 */
-export function applyChipEnhancement(root: Element): void {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const targets: Text[] = []
-  let node = walker.nextNode() as Text | null
-  while (node) { targets.push(node); node = walker.nextNode() as Text | null }
-  for (const textNode of targets) {
-    if (insideChip(textNode.parentNode)) continue
-    const text = textNode.textContent ?? ''
-    if (text.trim().length === 0) continue
-    const segments = splitPathSegments(text)
-    if (segments.length === 1 && segments[0].type === 'text') continue
-    const frag = document.createDocumentFragment()
-    for (const seg of segments) {
-      if (seg.type === 'text') { frag.appendChild(document.createTextNode(seg.value)); continue }
-      frag.appendChild(buildChip(seg.value, seg.type === 'url'))
-    }
-    textNode.parentNode?.replaceChild(frag, textNode)
+/** 路径片段在文本中的位置（offset 为 UTF-16 下标，可直接用于 DOM Range）。 */
+export interface LocatedSegment extends PathSegment { start: number; end: number }
+
+/** 切分并标出每个 url/file 片段的起止下标（纯函数，供高亮与点击命中共用）。 */
+export function locatePathSegments(text: string): LocatedSegment[] {
+  const out: LocatedSegment[] = []
+  let pos = 0
+  for (const seg of splitPathSegments(text)) {
+    if (seg.type !== 'text') out.push({ ...seg, start: pos, end: pos + seg.value.length })
+    pos += seg.value.length
   }
+  return out
+}
+
+/** 命中测试：offset 落在哪个 url/file 片段内（含首、不含尾），没有则 null。 */
+export function segmentAt(text: string, offset: number): LocatedSegment | null {
+  return locatePathSegments(text).find((s) => offset >= s.start && offset < s.end) ?? null
+}
+
+/** 文本节点是否可作为卡内路径（不在链接 / 插件自有交付物区 / 旧版 chip 内）。 */
+export function pathTextEligible(node: Node): boolean {
+  let cur: Node | null = node.parentNode
+  while (cur && cur instanceof Element) {
+    if (cur.tagName === 'A' || cur.classList.contains('dsh-concise-chip') || cur.classList.contains('dsh-concise-files')) return false
+    if (cur.classList.contains('dsh-concise-digest')) return true
+    cur = cur.parentNode
+  }
+  return true
+}
+
+/**
+ * v0.11.6：卡内路径「只读」标注——为每个路径片段生成 DOM Range（kind 决定高亮颜色）。
+ * 绝不改动卡内节点：卡片是宿主 React 管理的 DOM，替换其文本节点（旧 replaceChild chip 化）
+ * 会让 React 后续 reconcile 抛 NotFoundError(removeChild)，宿主 SlotErrorBoundary 随即把
+ * conversation.chat.node/assistant-step 整个 entry abdicate，所有会话的助手回复消失到刷新为止。
+ */
+export function collectPathRanges(root: Element): Array<{ range: Range; kind: PathKindInfo['kind'] }> {
+  const out: Array<{ range: Range; kind: PathKindInfo['kind'] }> = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!pathTextEligible(node)) continue
+    const text = node.textContent ?? ''
+    if (text.trim().length === 0) continue
+    for (const seg of locatePathSegments(text)) {
+      const range = document.createRange()
+      range.setStart(node, seg.start)
+      range.setEnd(node, seg.end)
+      out.push({ range, kind: seg.type === 'url' ? 'link' : detectPathKind(seg.value).kind })
+    }
+  }
+  return out
+}
+
+/** 高亮名（每种类型一个，颜色在 ::highlight() 样式里声明）。 */
+export function highlightName(kind: PathKindInfo['kind']): string {
+  return 'dcc-' + kind
+}
+
+/** 全部类型（供样式生成与清理）。 */
+export const PATH_KINDS = Object.keys(KIND_INFO) as Array<PathKindInfo['kind']>
+
+/** 类型颜色（供 ::highlight 样式生成）。 */
+export function kindColor(kind: PathKindInfo['kind']): string {
+  return KIND_INFO[kind].color
 }
 
 
