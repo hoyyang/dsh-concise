@@ -48,11 +48,12 @@ In one line: **the answer didn't get smaller — the filler is gone.**
 
 ![The Concise toggle in the composer (on)](assets/shot-hero-composer-zh.png)
 
-The toggle is **per-session**: turning it on here doesn't touch your other sessions (new sessions start off; set `defaultEnabled: true` to change that).
+The toggle is **per-session**: turning it on here doesn't touch your other sessions (new sessions start off). The **default for new sessions** is editable in the UI: click the **⌃** on the pill to open the settings popover and flip "Default for new sessions" — it is stored as the `default` field in `~/.dsh/dsh-concise/state.json` and applies to every session created afterwards (`defaultEnabled: true` does the same from config).
 
 ## Features
 
-- **One-click toggle (collapsed)** immediately left of the prompt-enhancer button (row order: Concise → prompt-enhancer → model picker): only the switch shows by default, pinned against the pill — hover or keyboard focus expands the label leftward with the right edge pinned, never shifting neighboring controls
+- **One-click toggle (collapsed)** immediately left of the prompt-enhancer button (row order: Concise → prompt-enhancer → model picker): only the switch shows by default, pinned against the pill — hover or keyboard focus expands the label leftward with the right edge pinned, never shifting neighboring controls. The pill is split into two independently focusable controls: the **track** switches the current session, the **label + ⌃** opens the settings popover
+- **New-session default switch (popover)**: the **⌃** on the expanded pill (or clicking the label) opens a small popover whose "Default for new sessions" row decides whether sessions created later start with Concise on — it is stored as the `default` field in `~/.dsh/dsh-concise/state.json` and shared across sessions. The caret stays visible until the entry has been discovered, and a one-time hint bubble explains it on first use; clicking outside or pressing ESC closes the popover, and ESC returns focus to the caret
 - **Plain-language digest card**: with Concise on, EVERY final reply opens with an engineering-blueprint card (intermediate step narration exempt) — faint grid + corner ticks + monospace 1.18em, dark text on light, works in both themes. It restates the conclusion in 2-3 plain sentences, only using facts the body already contains; selecting text inside copies it on mouse-up (header flashes COPIED ✓). The rule is issued unconditionally and re-injected on every model assembly; a tail reminder section and a per-step reminder counter attention decay on very long prompts. Since 0.11.0 the digest writing style fuses caveman × humanizer essentials: the first sentence IS the conclusion, telegraphic density, and no AI-tell filler
 - **Deliverables from real tool outputs (0.11.4)**: the `交付物 · FILES` zone at the bottom of the card lists files this turn actually produced — `write`, `present`, `dsh_image_gen`, `draw_code`, HTML-workshop results (both direct tool calls and `run_code`-nested dispatch). It never guesses from prose; every path is existence-checked before rendering, and clicking opens it with the OS default app
 - **Clickable in-card paths (0.11.6)**: paths inside the card are coloured with the CSS Custom Highlight API plus a dotted underline; a click hit-test resolves the path and hands it to the host to open. Links get only their `href` repaired (attribute-level)
@@ -64,11 +65,11 @@ The toggle is **per-session**: turning it on here doesn't touch your other sessi
 - **Claude's Concise style**: results first, no preamble, no narration, no filler closers
 - **Same work depth**: only reporting is compressed — never the rigor
 - **Effective on the next turn** via a dynamic system-prompt section (no restart, no session reload)
-- **Per-session scope**: the toggle only affects the current session's new replies — sessions stay independent (new sessions default off, configurable via `defaultEnabled`)
+- **Per-session scope**: the track switch only affects the current session's new replies — sessions stay independent; the default for newly created sessions comes from the popover's "Default for new sessions" switch (or the `defaultEnabled` config)
 - **Persistent**: per-session state survives restarts (atomic writes to `~/.dsh/dsh-concise/state.json`)
 - **Auto re-sync**: the button polls lightly every 15 s (visible tab only) plus on focus/visibility, so `/concise`, API, or other-tab changes are reflected without reload
 - **Clear visual state**: Claude-orange aurora gradient track with breathing glow when on, neutral glass when off; sheen sweep on hover and springy press feedback (all motion off under `prefers-reduced-motion`)
-- **Accessible**: `aria-pressed` toggle semantics, zh/en localized tooltip
+- **Accessible**: the track is a real `role="switch"` with `aria-checked`, the ⌃ entry is a separate `aria-haspopup="dialog"` button (focus returns to it on ESC), zh/en localized tooltips
 - **Multi-tab sync** via a custom DOM event
 - **Precise placement**: anchors immediately left of the prompt-enhancer entry (`div.dip-root`); without improve-prompt it anchors left of the model button, with graceful degradation when the model seat cannot be found
 - **Clean uninstall**: prompt sections, HTTP routes, host command, styles, and client registration are all removed
@@ -159,7 +160,7 @@ No. The prompt explicitly keeps "thoroughness unchanged" — investigation, veri
 Granularity and scope: this is a per-session toggle you flip at any time, without editing files or reloading; it injects a system-prompt section rather than project instructions, so it does not pollute your project config; and it works with any model.
 
 **Is the toggle global or per-session?**
-Per-session. Each session remembers its own state; new sessions default to off (set `defaultEnabled: true` for the opposite). The change applies from the next reply in that session only.
+Per-session. Each session remembers its own state; the default for newly created sessions is a separate switch — the "Default for new sessions" row in the ⌃ popover on the pill (or `defaultEnabled: true` in config) — and new sessions start off by default. The change applies from the next reply in that session only.
 
 **Where does the deliverables zone come from?**
 From this turn's real tool outputs (`write`, `present`, `dsh_image_gen`, `draw_code`, HTML-workshop results), not from prose guessing. Every path is existence-checked, so deleted files or example paths in prose are not listed.

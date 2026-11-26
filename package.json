@@ -1,7 +1,7 @@
 {
   "name": "dsh-concise",
   "description": "Concise output style for dsh: per-session toggle + digest card with clickable files. 简洁输出、每轮附摘要卡、路径可点。",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "type": "module",
   "main": "lib/index.js",
   "license": "MIT",
