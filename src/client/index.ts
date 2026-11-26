@@ -20,7 +20,7 @@
  */
 import React from 'react'
 import { normalizeDigestHref } from './normalize'
-import { activatePath, buildChip, collectDeliverables, collectPathRanges, highlightName, kindColor, pathTextEligible, PATH_KINDS, segmentAt } from './chips'
+import { activatePath, buildChip, collectDeliverables, collectPathRanges, highlightName, kindColor, pathTextEligible, PATH_KINDS, segmentAt, setSidebarOpener } from './chips'
 import { createRoot } from 'react-dom/client'
 
 type SlotsService = {
@@ -42,6 +42,25 @@ type ClientContext = {
   slots: SlotsService
   locale?: LocaleService
   effect: (fn: () => unknown | (() => void), label?: string) => void
+  /** 可选服务查询（不要求 inject 声明）；宿主未提供时返回 undefined。 */
+  get?: (name: string) => unknown
+}
+
+/** 客户端取到的右侧栏服务：只用 openResource 与 mounted。 */
+type SidebarRightService = {
+  openResource?: (address: string) => void
+  mounted?: { getSnapshot: () => string | undefined }
+}
+
+/**
+ * 文件资源地址：dsh-resource://file/session/<sessionId>/<path>
+ * 与宿主 @deepseek-ai/dsh-util-workspace-path 的 sessionFileAddress 同构：
+ * 路径按段编码，Windows 盘符冒号保留字面量。
+ */
+function sessionFileAddress(sessionId: string, path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '')
+  const encoded = normalized.split('/').map((seg) => encodeURIComponent(seg).replace(/%3A/gi, ':')).join('/')
+  return `dsh-resource://file/session/${encodeURIComponent(sessionId)}/${encoded}`
 }
 
 export const name = 'dsh-concise'
@@ -103,8 +122,8 @@ const css = [
   // 白卡面铺极淡网格线（::before，悬停增亮），四角橙色测量角标（::after 八层背景渐变，入场画出）；
   // 等宽字体栈 + 1.18em 大字号；头部「DIGEST // 说人话」；交互=点卡片复制摘要（头部闪现 COPIED ✓）；
   // 正文深暖棕黑 #2B211B 对比 ~14:1，阅读优先
-  '.dsh-concise-digest{position:relative!important;font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono","PingFang SC","Microsoft YaHei",monospace!important;font-size:1.18em!important;line-height:1.8!important;border:1px solid rgba(150,110,90,.16)!important;border-radius:16px!important;background:linear-gradient(180deg,#FEFDFC,#FBF7F3)!important;box-shadow:0 1px 4px rgba(60,40,30,.06)!important;padding:14px 18px!important;margin:10px 0!important;color:#2B211B!important;cursor:text;transition:box-shadow .25s ease,border-color .25s ease,transform .25s ease;animation:bp-in .4s ease backwards}',
-  '.dsh-concise-digest::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(150,110,90,.055) 0,rgba(150,110,90,.055) 1px,transparent 1px,transparent 26px),repeating-linear-gradient(90deg,rgba(150,110,90,.055) 0,rgba(150,110,90,.055) 1px,transparent 1px,transparent 26px);opacity:.55;transition:opacity .3s ease}',
+  '.dsh-concise-digest{position:relative!important;font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono","PingFang SC","Microsoft YaHei",monospace!important;font-size:1.18em!important;line-height:1.8!important;border:1px solid var(--dsw-alias-border-l2)!important;border-radius:16px!important;background:linear-gradient(180deg,color-mix(in srgb,var(--dsw-alias-label-primary) 6%,var(--dsw-alias-bg-base)),color-mix(in srgb,var(--dsw-alias-label-primary) 2%,var(--dsw-alias-bg-base)))!important;box-shadow:0 1px 4px rgba(60,40,30,.06)!important;padding:14px 18px!important;margin:10px 0!important;color:var(--dsw-alias-label-primary)!important;cursor:text;transition:box-shadow .25s ease,border-color .25s ease,transform .25s ease;animation:bp-in .4s ease backwards}',
+  '.dsh-concise-digest::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:repeating-linear-gradient(0deg,color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent) 0,color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent) 1px,transparent 1px,transparent 26px),repeating-linear-gradient(90deg,color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent) 0,color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent) 1px,transparent 1px,transparent 26px);opacity:.55;transition:opacity .3s ease}',
   '.dsh-concise-digest::after{content:"";position:absolute;inset:7px;pointer-events:none;background:linear-gradient(#E8926B,#E8926B) 0 0/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 0 0/2px 12px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 0/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 0/2px 12px no-repeat,linear-gradient(#E8926B,#E8926B) 0 100%/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 0 100%/2px 12px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 100%/13px 2px no-repeat,linear-gradient(#E8926B,#E8926B) 100% 100%/2px 12px no-repeat;opacity:.85;animation:bp-brackets .5s ease .12s backwards}',
   '.dsh-concise-digest:hover{border-color:rgba(201,87,59,.35)!important;box-shadow:0 4px 16px rgba(217,119,87,.12)!important;transform:translateY(-1px)}',
   '.dsh-concise-digest:hover::before{opacity:.85}',
@@ -115,11 +134,11 @@ const css = [
   '@keyframes bp-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
   '@keyframes bp-brackets{from{opacity:0}to{opacity:.9}}',
   // 头部「DIGEST // 说人话」= 块内首个 strong；复制成功闪现 COPIED ✓；正文关键词 strong = 加粗深色
-  '.dsh-concise-digest p>strong:first-child{display:block!important;font-weight:700!important;color:#2B211B!important;letter-spacing:.08em!important;margin-bottom:6px!important}',
+  '.dsh-concise-digest p>strong:first-child{display:block!important;font-weight:700!important;color:var(--dsw-alias-label-primary)!important;letter-spacing:.08em!important;margin-bottom:6px!important}',
   '.dsh-concise-digest p>strong:first-child::before{content:"DIGEST // ";color:#E8926B!important;letter-spacing:.06em!important}',
   '.dsh-concise-digest[data-copied="1"] p>strong:first-child::before{content:"COPIED ✓ ";color:#2E9E5B!important}',
-  '.dsh-concise-digest p strong:not(:first-child){font-weight:700!important;color:#17100D!important}',
-  '.dsh-concise-digest .dsh-concise-chip{display:inline-flex;align-items:center;gap:.3em;padding:.05em .5em;margin:0 .1em;vertical-align:baseline;border-radius:6px;border:1px solid color-mix(in srgb,var(--dcc-c) 42%,transparent);background:color-mix(in srgb,var(--dcc-c) 10%,transparent);color:var(--dcc-c);font-size:.92em;line-height:1.55;text-decoration:none!important;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease;animation:dcc-in .18s ease backwards}',
+  '.dsh-concise-digest p strong:not(:first-child){font-weight:700!important;color:var(--dsw-alias-label-primary)!important}.dsh-concise-digest :not(pre)>code{background-color:var(--dsw-alias-markdown-inline-code)!important;color:var(--dsw-alias-label-primary)!important;border-color:var(--dsw-alias-border-l1)!important}',
+  '.dsh-concise-digest .dsh-concise-chip{display:inline-flex;align-items:center;gap:.3em;padding:.05em .5em;margin:0 .1em;vertical-align:baseline;border-radius:6px;border:1px solid color-mix(in srgb,var(--dcc-c) 42%,transparent);background:color-mix(in srgb,var(--dcc-c) 10%,transparent);color:color-mix(in srgb,var(--dcc-c) 72%,var(--dsw-alias-label-primary));font-size:.92em;line-height:1.55;text-decoration:none!important;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease;animation:dcc-in .18s ease backwards}',
   '.dsh-concise-digest .dsh-concise-chip:hover{transform:translateY(-1px);border-color:var(--dcc-c);box-shadow:0 2px 12px color-mix(in srgb,var(--dcc-c) 32%,transparent);background:color-mix(in srgb,var(--dcc-c) 16%,transparent)}',
   '.dsh-concise-digest .dsh-concise-chip:active{transform:translateY(0) scale(.98)}',
   '.dsh-concise-digest .dsh-concise-chip .dcc-i{display:inline-flex;width:1.05em;height:1.05em;flex:none}',
@@ -130,8 +149,8 @@ const css = [
   '.dsh-concise-digest .dsh-concise-chip.dcc-copied .dcc-a{color:#2E9E5B;opacity:1}',
   '.dsh-concise-digest .dsh-concise-chip.dcc-copied::after{content:"已复制 ✓";color:#2E9E5B;font-size:.85em;font-weight:700;margin-left:.2em}',
   // v0.10.0 交付物聚合区：卡片底部虚线分隔 + 小标签 + chip 横向排布（可换行）
-  '.dsh-concise-files{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;padding-top:10px;border-top:1px dashed rgba(150,110,90,.28)}',
-  '.dsh-concise-files-label{font-size:.7em;letter-spacing:.14em;color:#B98263;font-weight:700;flex:none;user-select:none}',
+  '.dsh-concise-files{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--dsw-alias-border-l2)}',
+  '.dsh-concise-files-label{font-size:.7em;letter-spacing:.14em;color:color-mix(in srgb,var(--dsw-alias-label-primary) 55%,#B98263);font-weight:700;flex:none;user-select:none}',
   '.dsh-concise-files .dsh-concise-chip{max-width:100%}',
   '@keyframes dcc-in{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}',
   '@media (prefers-reduced-motion:reduce){.dsh-concise-digest .dsh-concise-chip{animation:none;transition:none}}',
@@ -428,6 +447,17 @@ export function apply(ctx: ClientContext): void {
     }
     return FALLBACK[key] ?? key
   }
+
+  // 交付物点击 → DSH 右侧栏预览（不再唤起本机默认应用）。
+  // 服务按需取：宿主未装右栏时取不到 → chips 内自动回落到旧的系统打开链路。
+  setSidebarOpener((abs) => {
+    const service = ctx.get?.('sidebarRight') as SidebarRightService | undefined
+    if (typeof service?.openResource !== 'function') throw new Error('dsh-concise: sidebarRight unavailable')
+    const sessionId = service.mounted?.getSnapshot?.()
+      ?? (globalThis as { __dshConciseSid?: string }).__dshConciseSid ?? ''
+    if (!sessionId) throw new Error('dsh-concise: no session on screen')
+    service.openResource(sessionFileAddress(sessionId, abs))
+  })
 
   // 0) 插件自有 CSS：随插件 fiber 卸载即净
   ctx.effect(() => {

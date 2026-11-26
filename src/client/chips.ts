@@ -143,6 +143,7 @@ export const CHIP_ICONS: Record<string, string> = {
   folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6a2 2 0 0 1 2-2h4l2.5 2.5H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>',
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+  panel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>',
 }
 
 /** 上次次探测的系统应用列表（进程内缓存，避免每次点击探测） */
@@ -223,6 +224,19 @@ function mark(el: HTMLElement, cls: string): void {
 }
 
 /**
+ * 侧边栏打开器：由 client 主体注入（ctx.get('sidebarRight')）。
+ * 交付物默认在 DSH 右侧栏预览，不唤起本机默认应用；未注入时回落到旧的系统打开链路。
+ */
+export type SidebarOpener = (absPath: string) => void
+
+let sidebarOpener: SidebarOpener | null = null
+
+/** 注册（或注销）侧边栏打开器。 */
+export function setSidebarOpener(opener: SidebarOpener | null): void {
+  sidebarOpener = opener
+}
+
+/**
  * 激活一个路径（chip 点击与卡内高亮点击共用）：URL → 新窗口；本地文件 → 渲染期解析的绝对
  * 路径直开 → cwd 候选依次试 → 单路径 verify 递归解析 → 全败降级复制。feedback 承载
  * dcc-opened / dcc-copied 短时状态类。
@@ -235,6 +249,11 @@ export async function activatePath(value: string, isUrl: boolean, feedback: HTML
   const path = value
   // open 400 = 目标不存在，无副作用，可安全连续尝试
   const tryOpen = async (abs: string): Promise<boolean> => {
+    // ① 侧边栏打开（首选）：文件留在 DSH 右栏预览，不唤起本机默认应用
+    if (sidebarOpener) {
+      try { sidebarOpener(abs); return true } catch { return false }
+    }
+    // ② 宿主无侧边栏能力 → 回落到系统默认应用
     try {
       const res = await fetch('/dsh-concise/api/open', {
         method: 'POST',
@@ -290,7 +309,7 @@ export function buildChip(value: string, isUrl: boolean): Element {
     a.target = '_blank'
     a.rel = 'noopener noreferrer'
   } else {
-    el.title = info.label + ' · 点击用系统默认应用打开'
+    el.title = info.label + ' · 在侧边栏打开'
   }
   el.addEventListener('click', (ev) => {
     ev.preventDefault()
@@ -307,7 +326,7 @@ export function buildChip(value: string, isUrl: boolean): Element {
   el.appendChild(label)
   const act = document.createElement('span')
   act.className = 'dcc-a'
-  act.innerHTML = isUrl ? CHIP_ICONS.link : CHIP_ICONS.copy
+  act.innerHTML = isUrl ? CHIP_ICONS.link : CHIP_ICONS.panel
   el.appendChild(act)
   return el
 }
