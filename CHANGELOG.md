@@ -3,6 +3,13 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.7] - 2026-11-27
+
+### Added
+- **新会话默认开关有了界面入口**：此前「新会话是否默认开启简洁输出风格」只能靠 `POST /dsh-concise/api/set`（不带 sessionId）或配置 `defaultEnabled` 改，界面上没有入口。现在 composer 里的 Concise 药丸拆成两个可独立聚焦的控件：**滑轨**切当前会话，**文字 + ⌃** 打开设置浮层；浮层里的「新会话默认」开关写入 `~/.dsh/dsh-concise/state.json` 的 `default` 字段，对之后新建的会话立即生效。浮层用 `createPortal` 挂到 `document.body`（不干扰宿主 React 树），z-index 1200（宿主浮层最高 1101），配色全部走 `--dsw-alias-*` 令牌、明暗主题通用。
+- **入口可发现**：⌃ 在用户第一次打开浮层之前常驻显示（收起态 `display:none` 不占位，42px 占位壳与右缘不变），首次使用弹一次说明气泡；点外部或 ESC 关闭，ESC 后焦点回到 ⌃ 按钮。
+- **浮层有五种关闭方式**：再点一次 ⌃、标题栏的 ✕ 关闭按钮、点浮层外部、ESC、指针移开药丸与浮层（420ms 宽限）。此前浮层只在「再按一次药丸」或「拨动开关」时才会消失，容易被误认为关不掉。
+
 ## [0.11.6] - 2026-10-11
 
 ### Fixed
