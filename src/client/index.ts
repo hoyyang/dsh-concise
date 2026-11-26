@@ -62,6 +62,8 @@ const zh = {
   tooltip: 'Concise 输出风格：结果先行、少废话',
   moreAria: '打开 Concise 输出风格设置',
   moreTitle: '设置新会话默认',
+  closeAria: '关闭设置',
+  closeTitle: '关闭',
   sessionHint: '只影响当前会话的新回复',
   sessionAria: '切换本会话的 Concise 输出风格',
   popTitle: 'Concise 输出风格设置',
@@ -86,6 +88,8 @@ const en = {
   sessionAria: 'Toggle concise output style for this session',
   moreAria: 'Open Concise output style settings',
   moreTitle: 'Set the default for new sessions',
+  closeAria: 'Close settings',
+  closeTitle: 'Close',
   defaultRow: 'Default for new sessions',
   defaultHint: 'Whether sessions created later start with it on',
   defaultAria: 'Toggle concise output style as the default for new sessions',
@@ -137,7 +141,12 @@ const css = [
   // 插件不依赖宿主 UI 包（保持跨版本可用），故浮层自绘：fixed 定位 + 自算 rect，
   // 颜色全部走宿主 token，暗色下自动跟随。
   '.dsh-concise-pop{position:fixed;z-index:1200;min-width:240px;padding:10px 12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);box-shadow:0 10px 30px rgba(0,0,0,.28);font-size:12px;line-height:1.45;color:var(--dsw-alias-label-primary);text-align:left;outline:none}',
-  '.dsh-concise-pop-title{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-label-secondary);margin-bottom:4px}',
+  '.dsh-concise-pop-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}',
+  '.dsh-concise-pop-title{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-label-secondary);margin-bottom:0}',
+  // 显式关闭按钮：浮层必须有肉眼可见的关闭方式（点外部 / ESC / 移开指针之外的最后一道兜底）
+  '.dsh-concise-pop-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;cursor:pointer}',
+  '.dsh-concise-pop-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+  '.dsh-concise-pop-close:focus-visible{outline:2px solid var(--dsw-alias-border-l3);outline-offset:2px}',
   '.dsh-concise-pop-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:7px 0}',
   '.dsh-concise-pop-row+.dsh-concise-pop-row{border-top:1px solid var(--dsw-alias-border-l2)}',
   '.dsh-concise-pop-text{min-width:0}',
@@ -432,6 +441,35 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
 
   const closePopover = React.useCallback(() => setPopOpen(false), [])
 
+  // 再点一次 ⌃ = 收起浮层（之前只会「打开」，用户找不到关掉的办法）。
+  const togglePopover = React.useCallback(() => {
+    if (popOpen) {
+      closePopover()
+      return
+    }
+    openPopover()
+  }, [popOpen, closePopover, openPopover])
+
+  // 鼠标移开即收：药丸与浮层都不在指针下时关闭（悬停菜单的常规行为）。
+  // 留 420ms 宽限，指针从药丸挪到浮层（两者隔 8px）时不会误关。
+  const hoverCloseTimer = React.useRef<number | null>(null)
+  const cancelHoverClose = React.useCallback(() => {
+    if (hoverCloseTimer.current !== null) {
+      window.clearTimeout(hoverCloseTimer.current)
+      hoverCloseTimer.current = null
+    }
+  }, [])
+  const scheduleHoverClose = React.useCallback(() => {
+    cancelHoverClose()
+    hoverCloseTimer.current = window.setTimeout(() => {
+      hoverCloseTimer.current = null
+      closePopover()
+    }, 420)
+  }, [cancelHoverClose, closePopover])
+  React.useEffect(() => () => {
+    if (hoverCloseTimer.current !== null) window.clearTimeout(hoverCloseTimer.current)
+  }, [])
+
   // 关闭后把焦点还给药丸的 ⌃ 按钮，键盘用户不会「掉」回页面顶部
   const closeAndRestoreFocus = React.useCallback(() => {
     closePopover()
@@ -451,12 +489,18 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
       if (event.key === 'Escape') closeAndRestoreFocus()
     }
     const onReflow = (): void => syncAnchor()
+    // 捕获阶段同时挂 window 与 document：捕获路径是 window → document → …，
+    // 宿主若在 document 上拦截事件，window 这一层仍能收到（重复触发 close 是幂等的）。
+    window.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true)
       document.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKeyDown, true)
       document.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
@@ -527,6 +571,8 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
         'data-caret': discovered ? 'false' : 'true',
         role: 'group',
         'aria-label': t('toggleAria'),
+        onMouseEnter: () => { cancelHoverClose() },
+        onMouseLeave: () => { scheduleHoverClose() },
       },
       // ⌃ / 文字 = 打开浮层（更多设置）：悬停展开时常显 ⌃，未发现时常驻
       React.createElement(
@@ -540,7 +586,9 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
           'aria-label': t('moreAria'),
           title: t('moreTitle'),
           disabled,
-          onClick: () => { openPopover() },
+          onClick: () => { togglePopover() },
+          onMouseEnter: () => { cancelHoverClose() },
+          onMouseLeave: () => { scheduleHoverClose() },
         },
         React.createElement('span', { className: 'dsh-concise-label' }, 'Concise'),
         React.createElement(
@@ -577,8 +625,27 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
             'aria-label': t('popTitle'),
             tabIndex: -1,
             style: { right: anchor.right + 'px', bottom: anchor.bottom + 'px' },
+            onMouseEnter: () => { cancelHoverClose() },
+            onMouseLeave: () => { scheduleHoverClose() },
           },
-          React.createElement('div', { className: 'dsh-concise-pop-title' }, t('popTitle')),
+          React.createElement(
+            'div',
+            { className: 'dsh-concise-pop-head' },
+            React.createElement('div', { className: 'dsh-concise-pop-title' }, t('popTitle')),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-concise-pop-close',
+                'aria-label': t('closeAria'),
+                title: t('closeTitle'),
+                onClick: () => { closeAndRestoreFocus() },
+                onMouseEnter: () => { cancelHoverClose() },
+                onMouseLeave: () => { scheduleHoverClose() },
+              },
+              '✕',
+            ),
+          ),
           React.createElement(
             'div',
             { className: 'dsh-concise-pop-row' },
