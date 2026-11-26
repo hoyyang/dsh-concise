@@ -22,6 +22,7 @@ import React from 'react'
 import { normalizeDigestHref } from './normalize'
 import { activatePath, buildChip, collectDeliverables, collectPathRanges, highlightName, kindColor, pathTextEligible, PATH_KINDS, segmentAt } from './chips'
 import { createRoot } from 'react-dom/client'
+import { createPortal } from 'react-dom'
 
 type SlotsService = {
   inject: (seat: string, fn: () => unknown) => unknown
@@ -50,21 +51,51 @@ export const inject = ['slots', 'locale']
 const NS = 'dsh-concise'
 const STATE_URL = '/dsh-concise/api/state'
 const TOGGLE_URL = '/dsh-concise/api/toggle'
+const SET_URL = '/dsh-concise/api/set'
 const CHANGE_EVENT = 'dsh-concise:change'
+// 可发现性状态：⌃ 入口是否已被发现 / 一次性提示气泡是否已看过
+const DISCOVERED_KEY = 'dsh-concise:popover-discovered'
+const HINT_KEY = 'dsh-concise:popover-hint'
 
 const zh = {
-  toggleAria: '切换 Concise 输出风格',
-  tooltip: 'Concise 输出风格：结果先行、少废话，工作深浅不变（仅影响当前会话的新回复）',
+  toggleAria: 'Concise 输出风格',
+  tooltip: 'Concise 输出风格：结果先行、少废话',
+  moreAria: '打开 Concise 输出风格设置',
+  moreTitle: '设置新会话默认',
+  closeAria: '关闭设置',
+  closeTitle: '关闭',
+  sessionHint: '只影响当前会话的新回复',
+  sessionAria: '切换本会话的 Concise 输出风格',
+  popTitle: 'Concise 输出风格设置',
+  defaultRow: '新会话默认',
+  defaultHint: '之后新建的会话是否默认开启',
+  defaultAria: '切换新会话是否默认开启 Concise 输出风格',
+  defaultOn: '已默认开启',
+  defaultOff: '已默认关闭',
+  hintText: '点 ⌃ 打开设置：决定新会话是否默认开启',
   on: '开',
   off: '关',
   unknown: '…',
 }
 const en = {
   toggleAria: 'Toggle concise output style',
-  tooltip: 'Concise output style: results first, no filler — same work depth (this session only, affects new replies)',
+  tooltip: 'Concise output style: results first, no filler (click the track for this session, click the label to set the default for new sessions)',
   on: 'ON',
   off: 'OFF',
   unknown: '…',
+  popTitle: 'Concise output style settings',
+  sessionHint: 'Affects new replies in this session only',
+  sessionAria: 'Toggle concise output style for this session',
+  moreAria: 'Open Concise output style settings',
+  moreTitle: 'Set the default for new sessions',
+  closeAria: 'Close settings',
+  closeTitle: 'Close',
+  defaultRow: 'Default for new sessions',
+  defaultHint: 'Whether sessions created later start with it on',
+  defaultAria: 'Toggle concise output style as the default for new sessions',
+  defaultOn: 'On by default',
+  defaultOff: 'Off by default',
+  hintText: 'Click the ⌃ to set the default for new sessions',
 }
 const FALLBACK: Record<string, string> = { ...en }
 
@@ -76,16 +107,22 @@ const css = [
   '.dsh-concise-trigger{position:absolute;right:0;top:0;height:28px;cursor:pointer;border-radius:24px;outline:none;display:inline-flex;align-items:center;white-space:nowrap;gap:0;padding:0 5px;font-size:12px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-secondary);background-image:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0));border:1px solid var(--dsw-alias-border-l2);z-index:2;transition:gap .28s cubic-bezier(.34,1.3,.5,1),padding .28s cubic-bezier(.34,1.3,.5,1),border-color .2s ease,color .2s ease,background-color .2s ease,transform .12s ease}',
   '.dsh-concise-trigger:hover{color:var(--dsw-alias-label-primary);background-color:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l3)}',
   '.dsh-concise-trigger:active{transform:scale(.96)}',
-  '.dsh-concise-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default;opacity:.7}',
+  '.dsh-concise-trigger[data-disabled="true"]{color:var(--dsw-alias-label-dimmed);cursor:default;opacity:.7}',
   // 悬停/键盘聚焦：文字三重过渡展开（宽度+透明度+位移），gap/padding 同步撑开
-  '.dsh-concise-trigger:hover,.dsh-concise-trigger:focus-visible{gap:6px;padding:0 9px}',
+  '.dsh-concise-trigger:hover,.dsh-concise-trigger:focus-within{gap:6px;padding:0 9px}',
   '.dsh-concise-label{max-width:0;opacity:0;transform:translateX(-4px);overflow:hidden;text-overflow:clip;white-space:nowrap;transition:max-width .3s cubic-bezier(.4,0,.2,1),opacity .22s ease,transform .3s cubic-bezier(.4,0,.2,1)}',
-  '.dsh-concise-trigger:hover .dsh-concise-label,.dsh-concise-trigger:focus-visible .dsh-concise-label{max-width:72px;opacity:1;transform:none}',
+  '.dsh-concise-trigger:hover .dsh-concise-label,.dsh-concise-trigger:focus-within .dsh-concise-label{max-width:72px;opacity:1;transform:none}',
+  // 「更多设置」入口：⌃ 向上箭头（浮层在药丸上方，故箭头朝上）。
+  // 收起态默认不占位 → 42px 占位壳与右缘严格不动；悬停/聚焦时随文字一起出现；
+  // 用户还没发现过该入口时（data-caret="true"）常驻显示，用完即隐（渐进披露）。
+  '.dsh-concise-more{display:inline-flex;align-items:center;flex:none;gap:2px;margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;line-height:inherit;cursor:pointer;outline:none}',
+  '.dsh-concise-caret{display:none;flex:none;width:10px;height:10px;opacity:.6;transition:opacity .2s ease}',
+  '.dsh-concise-trigger:hover .dsh-concise-caret,.dsh-concise-trigger:focus-within .dsh-concise-caret,.dsh-concise-trigger[data-caret="true"] .dsh-concise-caret{display:block;opacity:1}',
   // 流光扫过：悬停一次斜向高光（概念图②的对角玻璃反光）
   '.dsh-concise-trigger::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.26) 48%,transparent 62%);transform:translateX(-130%);transition:transform .65s ease}',
   '.dsh-concise-trigger:hover::after{transform:translateX(130%)}',
   // 滑动开关：轨道 30×16，滑块 10px 四周 2px 恒距，spring 回弹 + 按压拉长（iOS 手感）
-  '.dsh-concise-switch{position:relative;width:30px;height:16px;border-radius:999px;flex:none;background:var(--dsw-alias-interactive-bg-hover);border:1px solid var(--dsw-alias-border-l2);transition:background-color .25s ease,border-color .25s ease,box-shadow .25s ease}',
+  '.dsh-concise-switch{position:relative;width:30px;height:16px;border-radius:999px;flex:none;appearance:none;-webkit-appearance:none;padding:0;margin:0;cursor:pointer;font:inherit;line-height:1;color:inherit;background:var(--dsw-alias-interactive-bg-hover);border:1px solid var(--dsw-alias-border-l2);transition:background-color .25s ease,border-color .25s ease,box-shadow .25s ease}',
   '.dsh-concise-knob{position:absolute;top:50%;left:2px;width:10px;height:10px;border-radius:999px;background:linear-gradient(180deg,#fff,#f1f1f1);box-shadow:0 1px 2.5px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.04);transform:translateY(-50%);transition:transform .3s cubic-bezier(.34,1.56,.64,1),width .18s ease}',
   '.dsh-concise-trigger:active .dsh-concise-knob{width:11px}',
   // ON 态：Claude 橙极光三段渐变（概念图③），玻璃壳泛橙 + 静态柔辉；滑轨做呼吸脉动
@@ -95,10 +132,35 @@ const css = [
   '.dsh-concise-trigger[data-on="true"] .dsh-concise-switch{background:linear-gradient(135deg,#F0B08F,#D97757 55%,#C25E3F);border-color:rgba(217,119,87,.85);animation:dsh-concise-breathe 2.8s ease-in-out infinite}',
   '.dsh-concise-trigger[data-on="true"] .dsh-concise-knob{transform:translate(14px,-50%)}',
   '@keyframes dsh-concise-breathe{0%,100%{box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 0 7px rgba(217,119,87,.35)}50%{box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 0 15px rgba(217,119,87,.6)}}',
-  // 焦点环放 ON 规则之后，保证 ON 态聚焦时环不被辉光吞掉
-  '.dsh-concise-trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-border-l3)}',
+  // 焦点环放 ON 规则之后，保证 ON 态聚焦时环不被辉光吞掉；
+  // 用 outline 而非 box-shadow —— 滑轨 ON 态的呼吸动画会持续改写 box-shadow
+  '.dsh-concise-more:focus-visible,.dsh-concise-switch:focus-visible{outline:2px solid var(--dsw-alias-border-l3);outline-offset:2px}',
   // 无障碍：用户偏好减少动效时，呼吸/流光/展开过渡全部瞬时化
-  '@media (prefers-reduced-motion:reduce){.dsh-concise-trigger,.dsh-concise-trigger::after,.dsh-concise-label,.dsh-concise-switch,.dsh-concise-knob{transition:none!important;animation:none!important}}',
+  '@media (prefers-reduced-motion:reduce){.dsh-concise-trigger,.dsh-concise-trigger::after,.dsh-concise-label,.dsh-concise-switch,.dsh-concise-knob,.dsh-concise-caret{transition:none!important;animation:none!important}}',
+  // 会话/默认开关浮层：点药丸文字弹出，锚定在药丸上方。
+  // 插件不依赖宿主 UI 包（保持跨版本可用），故浮层自绘：fixed 定位 + 自算 rect，
+  // 颜色全部走宿主 token，暗色下自动跟随。
+  '.dsh-concise-pop{position:fixed;z-index:1200;min-width:240px;padding:10px 12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);box-shadow:0 10px 30px rgba(0,0,0,.28);font-size:12px;line-height:1.45;color:var(--dsw-alias-label-primary);text-align:left;outline:none}',
+  '.dsh-concise-pop-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}',
+  '.dsh-concise-pop-title{font-size:11px;letter-spacing:.08em;color:var(--dsw-alias-label-secondary);margin-bottom:0}',
+  // 显式关闭按钮：浮层必须有肉眼可见的关闭方式（点外部 / ESC / 移开指针之外的最后一道兜底）
+  '.dsh-concise-pop-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;cursor:pointer}',
+  '.dsh-concise-pop-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+  '.dsh-concise-pop-close:focus-visible{outline:2px solid var(--dsw-alias-border-l3);outline-offset:2px}',
+  '.dsh-concise-pop-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:7px 0}',
+  '.dsh-concise-pop-row+.dsh-concise-pop-row{border-top:1px solid var(--dsw-alias-border-l2)}',
+  '.dsh-concise-pop-text{min-width:0}',
+  '.dsh-concise-pop-label{font-weight:600;color:var(--dsw-alias-label-primary)}',
+  '.dsh-concise-pop-hint{font-size:11px;color:var(--dsw-alias-label-secondary);margin-top:1px}',
+  '.dsh-concise-pop-switch{position:relative;width:30px;height:16px;border-radius:999px;flex:none;cursor:pointer;padding:0;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-interactive-bg-hover);transition:background-color .25s ease,border-color .25s ease,box-shadow .25s ease}',
+  '.dsh-concise-pop-switch:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-border-l3)}',
+  '.dsh-concise-pop-knob{position:absolute;top:50%;left:2px;width:10px;height:10px;border-radius:999px;background:linear-gradient(180deg,#fff,#f1f1f1);box-shadow:0 1px 2.5px rgba(0,0,0,.28);transform:translateY(-50%);transition:transform .3s cubic-bezier(.34,1.56,.64,1)}',
+  '.dsh-concise-pop-switch[data-on="true"]{background:linear-gradient(135deg,#F0B08F,#D97757 55%,#C25E3F);border-color:rgba(217,119,87,.85)}',
+  '.dsh-concise-pop-switch[data-on="true"] .dsh-concise-pop-knob{transform:translate(14px,-50%)}',
+  '@media (prefers-reduced-motion:reduce){.dsh-concise-pop,.dsh-concise-pop-switch,.dsh-concise-pop-knob{transition:none!important;animation:none!important}}',
+  // 首次使用的一次性提示气泡：告诉用户药丸上的 ⌃ 能设置「新会话默认」。
+  // 看过一次即写入 localStorage，不再出现。
+  '.dsh-concise-hint{position:fixed;z-index:1200;max-width:260px;padding:7px 10px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);box-shadow:0 8px 24px rgba(0,0,0,.26);font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary);pointer-events:none}',
   // 精华摘要卡（v0.7，概念图 assets/style-digest-v07e.png）——「工程蓝图卡」定稿（用户选定）：
   // 白卡面铺极淡网格线（::before，悬停增亮），四角橙色测量角标（::after 八层背景渐变，入场画出）；
   // 等宽字体栈 + 1.18em 大字号；头部「DIGEST // 说人话」；交互=点卡片复制摘要（头部闪现 COPIED ✓）；
@@ -196,7 +258,13 @@ function cacheKey(sessionId: string | undefined): string {
   return sessionId ?? ''
 }
 
-async function fetchState(sessionId: string | undefined): Promise<boolean | null> {
+/** 一次状态读取的结果：会话开关 + 「新会话默认」全局开关。 */
+interface ConciseState {
+  readonly enabled: boolean
+  readonly defaultOn: boolean
+}
+
+async function fetchState(sessionId: string | undefined): Promise<ConciseState | null> {
   try {
     const qs = sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''
     const response = await fetch(STATE_URL + qs, { cache: 'no-store' })
@@ -205,8 +273,9 @@ async function fetchState(sessionId: string | undefined): Promise<boolean | null
     const enabled = data.enabled === true
     stateCache.set(cacheKey(sessionId), enabled)
     // 顺带记住「新会话默认值」：其它未访问过的会话也能即时渲染
-    if (typeof data.default === 'boolean') stateCache.set('', data.default)
-    return enabled
+    const defaultOn = data.default === true
+    if (typeof data.default === 'boolean') stateCache.set('', defaultOn)
+    return { enabled, defaultOn }
   } catch {
     return null
   }
@@ -219,10 +288,17 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
     return cached === undefined ? null : cached
   })
   const [busy, setBusy] = React.useState(false)
+  // 「新会话默认」是全局开关（state.json 的 default 字段），与会话开关互不影响
+  const [defaultOn, setDefaultOn] = React.useState<boolean>(() => stateCache.get('') === true)
 
   const applyEnabled = (value: boolean): void => {
     setEnabled(value)
     stateCache.set(cacheKey(sessionId), value)
+  }
+
+  const applyDefault = (value: boolean): void => {
+    setDefaultOn(value)
+    stateCache.set('', value)
   }
 
   React.useEffect(() => {
@@ -230,16 +306,26 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
     // v0.10.1：把当前会话 id 广播到 globalThis——digest 卡渲染（全局 scan，不经 slot inject）
     // 发 cwd/verify 请求时带上，host 才能精确定位该会话的 cwd
     ;(globalThis as { __dshConciseSid?: string }).__dshConciseSid = sessionId ?? ''
-    void fetchState(sessionId).then((value) => {
-      if (!disposed && value !== null) setEnabled(value)
+    void fetchState(sessionId).then((state) => {
+      if (disposed || state === null) return
+      setEnabled(state.enabled)
+      applyDefault(state.defaultOn)
     })
     const refetch = () => {
-      void fetchState(sessionId).then((value) => {
-        if (value !== null) applyEnabled(value)
+      void fetchState(sessionId).then((state) => {
+        if (state !== null) {
+          applyEnabled(state.enabled)
+          applyDefault(state.defaultOn)
+        }
       })
     }
     const onChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ enabled?: boolean; sessionId?: string }>).detail
+      const detail = (event as CustomEvent<{ enabled?: boolean; sessionId?: string; defaultOn?: boolean }>).detail
+      // 全局默认的即时广播：只更新默认开关，不动会话开关
+      if (detail && typeof detail.defaultOn === 'boolean') {
+        applyDefault(detail.defaultOn)
+        return
+      }
       // 只接受同一会话的即时广播；其它会话的变化走轮询/focus 重取
       if (detail && typeof detail.enabled === 'boolean' && detail.sessionId === sessionId) applyEnabled(detail.enabled)
       else refetch()
@@ -285,26 +371,320 @@ const ConciseButton = ({ t, sessionId }: { t: (key: string) => string; sessionId
     }
   }
 
+  // 全局默认开关：不带 sessionId → 写 state.json 的 default 字段（对新会话生效）
+  const toggleDefault = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const next = !defaultOn
+      const response = await fetch(SET_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      })
+      if (response.ok) {
+        const data = await response.json() as { enabled?: unknown }
+        const applied = typeof data.enabled === 'boolean' ? data.enabled : next
+        applyDefault(applied)
+        window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { defaultOn: applied } }))
+      }
+    } catch (error) {
+      console.warn('[dsh-concise] toggle default failed:', error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 浮层：点药丸上的 ⌃（或文字）弹出，锚定在药丸上方；点外部或 ESC 关闭。
+  // 药丸拆成两个可独立聚焦的控件：⌃/文字 = 打开浮层（更多设置），
+  // 滑轨 = 直切本会话（role=switch，键盘可达，不再依赖浮层里的重复开关）。
+  const [popOpen, setPopOpen] = React.useState(false)
+  const [anchor, setAnchor] = React.useState<{ right: number; bottom: number } | null>(null)
+  const pillRef = React.useRef<HTMLSpanElement | null>(null)
+  const moreRef = React.useRef<HTMLButtonElement | null>(null)
+  const popRef = React.useRef<HTMLDivElement | null>(null)
+
+  // 可发现性：⌃ 入口是否已被发现。未发现时常驻显示（data-caret="true"），
+  // 打开过一次浮层后收起用完即隐；首次进入还给一次文字提示气泡。
+  const [discovered, setDiscovered] = React.useState(true)
+  const [hintOpen, setHintOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    try {
+      setDiscovered(window.localStorage?.getItem(DISCOVERED_KEY) === '1')
+    } catch (error) {
+      // localStorage 不可用 → 按「已发现」处理，不打扰用户
+    }
+  }, [])
+
+  const syncAnchor = React.useCallback(() => {
+    const element = pillRef.current
+    if (!element) return
+    const rect = element.getBoundingClientRect()
+    setAnchor({
+      right: Math.max(8, Math.round(window.innerWidth - rect.right)),
+      bottom: Math.max(8, Math.round(window.innerHeight - rect.top + 8)),
+    })
+  }, [])
+
+  const openPopover = React.useCallback(() => {
+    syncAnchor()
+    setPopOpen(true)
+    setHintOpen(false)
+    setDiscovered(true)
+    try {
+      window.localStorage?.setItem(DISCOVERED_KEY, '1')
+    } catch (error) {
+      // 忽略：只是不记住「已发现」，功能不受影响
+    }
+  }, [syncAnchor])
+
+  const closePopover = React.useCallback(() => setPopOpen(false), [])
+
+  // 再点一次 ⌃ = 收起浮层（之前只会「打开」，用户找不到关掉的办法）。
+  const togglePopover = React.useCallback(() => {
+    if (popOpen) {
+      closePopover()
+      return
+    }
+    openPopover()
+  }, [popOpen, closePopover, openPopover])
+
+  // 鼠标移开即收：药丸与浮层都不在指针下时关闭（悬停菜单的常规行为）。
+  // 留 420ms 宽限，指针从药丸挪到浮层（两者隔 8px）时不会误关。
+  const hoverCloseTimer = React.useRef<number | null>(null)
+  const cancelHoverClose = React.useCallback(() => {
+    if (hoverCloseTimer.current !== null) {
+      window.clearTimeout(hoverCloseTimer.current)
+      hoverCloseTimer.current = null
+    }
+  }, [])
+  const scheduleHoverClose = React.useCallback(() => {
+    cancelHoverClose()
+    hoverCloseTimer.current = window.setTimeout(() => {
+      hoverCloseTimer.current = null
+      closePopover()
+    }, 420)
+  }, [cancelHoverClose, closePopover])
+  React.useEffect(() => () => {
+    if (hoverCloseTimer.current !== null) window.clearTimeout(hoverCloseTimer.current)
+  }, [])
+
+  // 关闭后把焦点还给药丸的 ⌃ 按钮，键盘用户不会「掉」回页面顶部
+  const closeAndRestoreFocus = React.useCallback(() => {
+    closePopover()
+    moreRef.current?.focus({ preventScroll: true })
+  }, [closePopover])
+
+  React.useEffect(() => {
+    if (!popOpen) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (popRef.current?.contains(target)) return
+      if (pillRef.current?.contains(target)) return
+      closePopover()
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') closeAndRestoreFocus()
+    }
+    const onReflow = (): void => syncAnchor()
+    // 捕获阶段同时挂 window 与 document：捕获路径是 window → document → …，
+    // 宿主若在 document 上拦截事件，window 这一层仍能收到（重复触发 close 是幂等的）。
+    window.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('keydown', onKeyDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('resize', onReflow)
+    window.addEventListener('scroll', onReflow, true)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', onReflow)
+      window.removeEventListener('scroll', onReflow, true)
+    }
+  }, [popOpen, closePopover, closeAndRestoreFocus, syncAnchor])
+
+  // 键盘可达：浮层打开后把焦点移进浮层，Tab 可在开关之间移动
+  React.useEffect(() => {
+    if (!popOpen) return
+    const handle = window.setTimeout(() => popRef.current?.focus({ preventScroll: true }), 0)
+    return () => window.clearTimeout(handle)
+  }, [popOpen])
+
+  // 首次使用的一次性提示气泡：告诉用户药丸上的 ⌃ 可以设置「新会话默认」。
+  // 只在「入口尚未被发现」且「提示尚未看过」时出现一次，看过即记入 localStorage。
+  React.useEffect(() => {
+    if (discovered) return
+    let seen = true
+    try {
+      seen = window.localStorage?.getItem(HINT_KEY) === '1'
+    } catch (error) {
+      seen = true
+    }
+    if (seen) return
+    const handle = window.setTimeout(() => {
+      syncAnchor()
+      setHintOpen(true)
+    }, 1200)
+    return () => window.clearTimeout(handle)
+  }, [discovered, syncAnchor])
+
+  React.useEffect(() => {
+    if (!hintOpen) return
+    const dismiss = (): void => {
+      setHintOpen(false)
+      try {
+        window.localStorage?.setItem(HINT_KEY, '1')
+      } catch (error) {
+        // 忽略：只是不记住「已看过」
+      }
+    }
+    const handle = window.setTimeout(dismiss, 9000)
+    const onPointerDown = (): void => dismiss()
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') dismiss()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.clearTimeout(handle)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [hintOpen])
+
   const on = enabled === true
+  const disabled = busy || enabled === null
   return React.createElement(
     'div',
     { className: 'dsh-concise-root' },
     React.createElement(
-      'button',
+      'span',
       {
-        type: 'button',
+        ref: pillRef,
         className: 'dsh-concise-trigger',
         'data-on': on ? 'true' : 'false',
-        'aria-pressed': on,
+        'data-disabled': disabled ? 'true' : 'false',
+        'data-caret': discovered ? 'false' : 'true',
+        role: 'group',
         'aria-label': t('toggleAria'),
-        title: t('tooltip'),
-        disabled: busy || enabled === null,
-        onClick: () => { void toggle() },
+        onMouseEnter: () => { cancelHoverClose() },
+        onMouseLeave: () => { scheduleHoverClose() },
       },
-      React.createElement('span', { className: 'dsh-concise-label' }, 'Concise'),
-      React.createElement('span', { className: 'dsh-concise-switch', 'aria-hidden': true },
-        React.createElement('span', { className: 'dsh-concise-knob' })),
+      // ⌃ / 文字 = 打开浮层（更多设置）：悬停展开时常显 ⌃，未发现时常驻
+      React.createElement(
+        'button',
+        {
+          ref: moreRef,
+          type: 'button',
+          className: 'dsh-concise-more',
+          'aria-haspopup': 'dialog',
+          'aria-expanded': popOpen,
+          'aria-label': t('moreAria'),
+          title: t('moreTitle'),
+          disabled,
+          onClick: () => { togglePopover() },
+          onMouseEnter: () => { cancelHoverClose() },
+          onMouseLeave: () => { scheduleHoverClose() },
+        },
+        React.createElement('span', { className: 'dsh-concise-label' }, 'Concise'),
+        React.createElement(
+          'svg',
+          { className: 'dsh-concise-caret', viewBox: '0 0 10 10', width: 10, height: 10, 'aria-hidden': 'true', focusable: 'false' },
+          React.createElement('path', { d: 'M2 6.4 L5 3.4 L8 6.4', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        ),
+      ),
+      // 滑轨 = 直切本会话（独立可聚焦控件，键盘可达）
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          role: 'switch',
+          className: 'dsh-concise-switch',
+          'data-on': on ? 'true' : 'false',
+          'aria-checked': on,
+          'aria-label': t('sessionAria'),
+          title: t('sessionHint'),
+          disabled,
+          onClick: () => { void toggle() },
+        },
+        React.createElement('span', { className: 'dsh-concise-knob' }),
+      ),
     ),
+    popOpen && anchor !== null
+      ? createPortal(
+        React.createElement(
+          'div',
+          {
+            ref: popRef,
+            className: 'dsh-concise-pop',
+            role: 'dialog',
+            'aria-label': t('popTitle'),
+            tabIndex: -1,
+            style: { right: anchor.right + 'px', bottom: anchor.bottom + 'px' },
+            onMouseEnter: () => { cancelHoverClose() },
+            onMouseLeave: () => { scheduleHoverClose() },
+          },
+          React.createElement(
+            'div',
+            { className: 'dsh-concise-pop-head' },
+            React.createElement('div', { className: 'dsh-concise-pop-title' }, t('popTitle')),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-concise-pop-close',
+                'aria-label': t('closeAria'),
+                title: t('closeTitle'),
+                onClick: () => { closeAndRestoreFocus() },
+                onMouseEnter: () => { cancelHoverClose() },
+                onMouseLeave: () => { scheduleHoverClose() },
+              },
+              '✕',
+            ),
+          ),
+          React.createElement(
+            'div',
+            { className: 'dsh-concise-pop-row' },
+            React.createElement(
+              'div',
+              { className: 'dsh-concise-pop-text' },
+              React.createElement('div', { className: 'dsh-concise-pop-label' }, t('defaultRow')),
+              React.createElement('div', { className: 'dsh-concise-pop-hint' }, t('defaultHint')),
+            ),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                role: 'switch',
+                className: 'dsh-concise-pop-switch',
+                'data-on': defaultOn ? 'true' : 'false',
+                'aria-checked': defaultOn,
+                'aria-label': t('defaultAria'),
+                title: defaultOn ? t('defaultOn') : t('defaultOff'),
+                disabled: busy,
+                onClick: () => { void toggleDefault() },
+              },
+              React.createElement('span', { className: 'dsh-concise-pop-knob' }),
+            ),
+          ),
+        ),
+        document.body,
+      )
+      : null,
+    hintOpen && anchor !== null
+      ? createPortal(
+        React.createElement(
+          'div',
+          { className: 'dsh-concise-hint', role: 'status', style: { right: anchor.right + 'px', bottom: anchor.bottom + 'px' } },
+          t('hintText'),
+        ),
+        document.body,
+      )
+      : null,
   )
 }
 
